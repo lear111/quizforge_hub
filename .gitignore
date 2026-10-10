@@ -1,0 +1,13 @@
+node_modules/
+data/
+.sites-runtime/
+.openai/
+.env
+.env.*
+*.env
+secrets/
+*.pem
+*.key
+coverage/
+*.log
+output/

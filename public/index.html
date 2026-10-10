@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="QuizForge 题库广场：分享你的题库，发现值得练习的内容。浏览介绍与截图，下载题库压缩包，与作者交流。">
+  <meta name="theme-color" content="#7856d3">
+  <title>QuizForge · 题库广场</title><link rel="icon" type="image/png" href="/quizforge-icon.png"><link rel="apple-touch-icon" href="/quizforge-icon.png"><link rel="stylesheet" href="/styles.css"><script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="header"><a class="brand" href="#library" aria-label="QuizForge 题库广场首页"><img class="brand-icon" src="/quizforge-icon.png" width="40" height="40" alt=""><span>QuizForge<small>题库广场</small></span></a><nav aria-label="主导航"><a href="#library" data-nav="library">发现题库</a><a href="#mine" data-nav="mine">我的分享</a></nav><div class="header-actions" id="account"></div></header>
+  <main id="app" tabindex="-1"><div class="loading">正在打开题库广场…</div></main>
+  <footer class="footer"><a class="footer-brand" href="#library">QuizForge <span>题库广场</span></a><button class="text-button" data-action="guidelines">分享须知</button></footer>
+  <dialog id="auth-dialog" class="dialog auth-dialog" aria-labelledby="auth-title"><button class="dialog-close" data-action="close-dialog" aria-label="关闭">×</button><div id="auth-content"></div></dialog>
+  <dialog id="message-dialog" class="dialog" aria-labelledby="message-title"><button class="dialog-close" data-action="close-dialog" aria-label="关闭">×</button><div id="message-content"></div></dialog>
+  <dialog id="image-dialog" class="image-dialog" aria-label="截图大图"><button class="dialog-close" data-action="close-dialog" aria-label="关闭大图">×</button><img id="large-image" alt="题库截图大图"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body></html>

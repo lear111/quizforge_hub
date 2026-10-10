@@ -1,0 +1,211 @@
+const $ = selector => document.querySelector(selector);
+const app = $('#app');
+const icons = { plus: '<path d="M12 5v14M5 12h14"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>', grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>', book: '<path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1v15"/>', award: '<circle cx="12" cy="9" r="6"/><path d="m8 14-2 7 6-3 6 3-2-7"/>', code: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6m-3-14-2 16"/>', globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>', folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>', download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>', chat: '<path d="M21 11a9 9 0 0 1-9 9H3l2-5a9 9 0 1 1 16-4z"/>', upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>', image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="2"/><path d="m21 16-5-5-8 10"/>', check: '<path d="m5 12 4 4L19 6"/>', arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>', edit: '<path d="m16 3 5 5-12 12-6 1 1-6L16 3zM14 5l5 5"/>' };
+const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.book}</svg>`;
+const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+const size = value => value >= 1e9 ? `${(value / 1e9).toFixed(1)} GB` : value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(value / 1024)} KB`;
+const date = value => new Date(value).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+const avatar = name => `<span class="avatar">${esc(Array.from(name || '?')[0])}</span>`;
+const tagList = tags => `<div class="tags">${tags.map(v => `<span class="tag">${esc(v)}</span>`).join('')}</div>`;
+let user = null, maxArchiveMB = 20, turn = 0, toastTimer, authTarget = null;
+let filters = { q: '', sort: 'latest', page: 1 };
+let currentPack = null, upload = null, previewUrls = [];
+let registrationReady = false, captchaSiteKey = '', captchaWidget = null, captchaToken = '', captchaLoader, codeTimer;
+const codeCooldowns = new Map();
+function clearCaptcha() {
+  if (captchaWidget !== null && window.turnstile) window.turnstile.remove(captchaWidget);
+  captchaWidget = null; captchaToken = ''; clearInterval(codeTimer);
+}
+function loadCaptcha() {
+  if (window.turnstile) return Promise.resolve();
+  if (!captchaLoader) captchaLoader = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.onload = resolve; script.onerror = () => { script.remove(); captchaLoader = null; reject(new Error('人机验证加载失败，请稍后重试')); };
+    document.head.append(script);
+  });
+  return captchaLoader;
+}
+function updateCodeButton() {
+  const button = $('#send-email-code'); if (!button) return;
+  const email = $('#auth-email').value.trim().toLowerCase();
+  const remaining = Math.max(0, Math.ceil(((codeCooldowns.get(email) || 0) - Date.now()) / 1000));
+  button.textContent = remaining ? `${remaining} 秒后重发` : '获取验证码';
+  button.disabled = !registrationReady || !captchaToken || remaining > 0 || button.dataset.sending === '1';
+}
+async function mountCaptcha() {
+  const container = $('#register-captcha'); if (!container || !registrationReady) return;
+  try {
+    await loadCaptcha();
+    if (!container.isConnected || !$('#auth-dialog').open) return;
+    captchaWidget = window.turnstile.render(container, { sitekey: captchaSiteKey, action: 'register_email', size: container.clientWidth < 300 ? 'compact' : 'flexible',
+      callback: token => { captchaToken = token; updateCodeButton(); },
+      'expired-callback': () => { captchaToken = ''; updateCodeButton(); },
+      'error-callback': () => { captchaToken = ''; updateCodeButton(); $('#auth-form .form-error').textContent = '人机验证未完成，请重试'; },
+    });
+    codeTimer = setInterval(updateCodeButton, 1000); updateCodeButton();
+  } catch (error) { if (container.isConnected) $('#auth-form .form-error').textContent = error.message; }
+}
+async function sendEmailCode() {
+  const input = $('#auth-email'), button = $('#send-email-code'), form = $('#auth-form');
+  if (!input.reportValidity() || !captchaToken || button.disabled) return;
+  const email = input.value.trim().toLowerCase();
+  const widget = captchaWidget;
+  button.dataset.sending = '1'; updateCodeButton(); form.querySelector('.form-error').textContent = '';
+  try {
+    const result = await api('/api/auth/email-code', jsonOptions({ email, captchaToken }));
+    codeCooldowns.set(email, Date.now() + result.retryAfter * 1000); toast(result.message);
+  } catch (error) { if (form.isConnected) form.querySelector('.form-error').textContent = error.message; }
+  finally {
+    button.dataset.sending = '0';
+    if (widget === captchaWidget) { captchaToken = ''; if (widget !== null) window.turnstile.reset(widget); }
+    updateCodeButton();
+  }
+}
+
+async function api(url, options = {}) {
+  const response = await fetch(url, options);
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || '请求失败，请稍后重试');
+  return result;
+}
+const jsonOptions = (body, method = 'POST') => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+function toast(message) { const node = $('#toast'); node.textContent = message; node.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 4500); }
+function account() {
+  $('#account').innerHTML = `${user ? `<div class="user-chip"><a href="#mine" class="avatar" title="我的分享">${esc(Array.from(user.name)[0])}</a><a href="#mine" class="name">${esc(user.name)}</a><button class="text-button" data-action="logout">退出</button></div>${user.admin ? '<a class="text-button" href="#reports">管理</a>' : ''}` : '<button class="text-button" data-action="login">登录 / 注册</button>'}<a href="#upload" class="button">${icon('plus')}<span>分享题库</span></a>`;
+}
+function empty(title, description, action = '<a class="button small" href="#upload">分享第一个题库 ' + icon('arrow') + '</a>') { return `<div class="empty"><div class="empty-symbol">${icon('book')}</div><h3>${title}</h3><p>${description}</p>${action}</div>`; }
+function card(pack) {
+  return `<a class="pack-card" href="#pack/${pack.id}">${pack.screenshots[0] ? `<div class="card-cover"><img src="/media/${pack.screenshots[0].id}" alt="${esc(pack.title)}截图" loading="lazy"></div>` : ''}<div class="card-content"><h3>${esc(pack.title)}</h3><p class="card-description">${esc(pack.summary)}</p>${tagList(pack.tags)}<div class="card-author">${avatar(pack.author)}<span class="author-name">${esc(pack.author)}</span><time datetime="${pack.updated}">${date(pack.updated)} 更新</time></div><div class="card-meta"><span>${icon('download')}${pack.downloads} 次下载请求</span><span>${icon('chat')}${pack.commentCount} 条评论</span><span class="size">${size(pack.archive.size)}</span></div></div></a>`;
+}
+async function library(mine, stamp) {
+  const params = new URLSearchParams({ q: filters.q, sort: filters.sort, page: filters.page, ...(mine ? { mine: '1' } : {}) });
+  const result = await api('/api/packs?' + params);
+  if (stamp !== turn) return;
+  app.innerHTML = `<div class="listing-header"><h1>${mine ? '我的分享' : '题库分享'}</h1><p>${mine ? '管理你上传的题库。' : '浏览题库介绍与截图，下载压缩包，和作者交流。'}</p></div>
+  <section class="library-single"><div class="library-top"><form class="search" id="search-form">${icon('search')}<input name="q" value="${esc(filters.q)}" placeholder="搜索题库名称、简介或标签" aria-label="搜索题库"><button class="search-submit" type="submit">搜索</button></form><span class="listing-count">${filters.q ? '找到' : '共'} ${result.count} 份题库</span><select class="sort" id="sort" aria-label="题库排序"><option value="latest" ${filters.sort === 'latest' ? 'selected' : ''}>最近更新</option><option value="popular" ${filters.sort === 'popular' ? 'selected' : ''}>最多下载</option></select></div>${filters.q ? `<div class="search-result-note">搜索“${esc(filters.q)}”<button class="text-button" data-action="reset-search">清除搜索 ×</button></div>` : ''}<div class="cards">${result.packs.length ? result.packs.map(card).join('') : filters.q ? empty('没有找到匹配的题库', '换个关键词试试。', '<button class="button small secondary" data-action="reset-search">清除搜索</button>') : empty(mine ? '你还没有上传题库' : '还没有题库', '上传压缩包，填写简介，也可以添加截图。', '<a class="button small" href="#upload">' + icon('plus') + '上传题库</a>')}</div>${result.count > 12 ? `<div class="pagination"><button class="button small secondary" data-page="${result.page - 1}" ${result.page === 1 ? 'disabled' : ''}>上一页</button><span>${result.page} / ${Math.ceil(result.count / 12)}</span><button class="button small secondary" data-page="${result.page + 1}" ${result.page * 12 >= result.count ? 'disabled' : ''}>下一页</button></div>` : ''}</section>`;
+}
+async function detail(id, stamp) {
+  const result = await api('/api/packs/' + id);
+  if (stamp !== turn) return;
+  const p = result.pack; currentPack = p;
+  document.title = `${p.title} · QuizForge 题库广场`;
+  app.innerHTML = `<div class="breadcrumb"><a href="#library">题库广场</a><span>/</span><span>题库详情</span></div><div class="detail-layout"><article class="detail-main">${tagList(p.tags)}<h1>${esc(p.title)}</h1><div class="detail-meta">${avatar(p.author)}<span>${esc(p.author)}</span><span>·</span><span>${new Date(p.updated).toLocaleDateString('zh-CN')} 更新</span><span>·</span><span>版本 ${esc(p.version)}</span></div><p class="detail-summary">${esc(p.summary)}</p><section class="panel"><h2>题库介绍</h2><div class="prose">${esc(p.description)}</div></section><section class="panel"><h2>题库截图 <span class="count">${p.screenshots.length} 张</span></h2>${p.screenshots.length ? `<div class="gallery">${p.screenshots.map((f, i) => `<button data-image="/media/${f.id}" aria-label="查看第 ${i + 1} 张截图"><img src="/media/${f.id}" alt="${esc(p.title)}，截图 ${i + 1}" loading="lazy"></button>`).join('')}</div><p class="subtle">点击图片查看大图</p>` : '<p class="subtle">作者尚未添加截图。</p>'}</section><section class="panel"><h2>交流与反馈 <span class="count">${p.commentCount} 条</span></h2>${user ? `<form id="comment-form" class="comment-form"><label for="comment-body" class="subtle">分享使用体验，或向作者提问</label><textarea id="comment-body" name="body" maxlength="2000" required placeholder="你觉得这份题库怎么样？"></textarea><div class="form-bottom"><span>友善交流，请勿发布广告或个人敏感信息</span><button class="button small" type="submit">发表评论</button></div><p class="form-error" role="alert"></p></form>` : '<p class="subtle">登录后可以发表评论，与作者交流。 <button class="text-button" data-action="login">去登录 →</button></p>'}<div>${result.comments.length ? result.comments.map(c => `<div class="comment"><div class="comment-head">${avatar(c.author)}<strong>${esc(c.author)}</strong><time>${new Date(c.created).toLocaleString('zh-CN')}</time>${user && (user.id === c.user_id || user.admin) ? `<button class="text-button danger" data-delete-comment="${c.id}">删除</button>` : ''}</div><p class="comment-body">${esc(c.body)}</p></div>`).join('') : '<p class="subtle">还没有评论，欢迎留下第一条反馈。</p>'}</div>${p.commentCount > 100 ? '<p class="subtle">显示最近 100 条评论。</p>' : ''}</section></article><aside class="detail-side"><section class="panel download-panel"><div class="file-icon">${icon('folder')}</div><h2>下载这份题库</h2><p class="file-name">${esc(p.archive.name)}</p><div class="file-facts"><div><span>文件大小</span><strong>${size(p.archive.size)}</strong></div><div><span>版本</span><strong>${esc(p.version)}</strong></div><div><span>下载请求</span><strong>${p.downloads}</strong></div></div><button class="button" data-action="download">${icon('download')}下载压缩包</button><p class="download-note">文件由作者上传，未经病毒扫描。请自行检查内容后，再在 QuizForge 中导入或使用。</p><details class="checksum"><summary>文件校验值 · SHA-256</summary><code>${p.archive.sha256}</code></details><div class="author-actions">${user?.id === p.user_id ? `<a href="#edit/${p.id}" class="button small secondary">${icon('edit')}编辑题库</a>` : ''}${user && (user.id === p.user_id || user.admin) ? '<button class="text-button danger" data-action="delete-pack">下架题库</button>' : ''}<button class="text-button" data-action="report">举报内容</button></div></section></aside></div>`;
+}
+function uploadForm(pack) {
+  upload = { pack, keep: pack?.screenshots.map(f => f.id) || [], pictures: [] };
+  app.innerHTML = `<div class="breadcrumb"><a href="#library">题库广场</a><span>/</span><span>${pack ? '编辑题库' : '分享题库'}</span></div><h1 class="page-title">${pack ? '编辑题库' : '上传题库'}</h1><p class="page-subtitle">${pack ? '修改介绍、截图或压缩包。' : '选择压缩包，填写简介，可添加截图。'}</p><div class="form-layout"><form id="upload-form" class="upload-form"><section class="form-section"><div class="section-title"><span class="section-number">01</span>基本信息</div><div class="field"><label for="title">题库名称</label><input id="title" name="title" maxlength="80" required value="${esc(pack?.title || '')}" placeholder="例如：考研英语长难句练习 · 基础篇"></div><div class="field-row"><div class="field"><label for="version">版本号</label><input id="version" name="version" maxlength="30" value="${esc(pack?.version || '1.0')}" required></div></div><div class="field"><label for="summary">一句话简介 <small>最多 240 字</small></label><input id="summary" name="summary" required maxlength="240" value="${esc(pack?.summary || '')}" placeholder="简要说明内容范围、适用人群和特色"></div><div class="field"><label for="tags">标签 <small>用逗号分隔，最多 5 个</small></label><input id="tags" name="tags" maxlength="100" value="${esc(pack?.tags.join(', ') || '')}" placeholder="英语, 长难句, 基础练习"></div><div class="field"><label for="description">详细介绍</label><textarea id="description" name="description" required maxlength="12000" placeholder="介绍题库内容、资料来源、适合的学习阶段，以及导入和使用方式。">${esc(pack?.description || '')}</textarea><p class="field-help">支持分段纯文本。说明来源和适用版本，能帮助大家判断是否适合自己。</p></div></section><section class="form-section"><div class="section-title"><span class="section-number">02</span>题库文件</div><label class="upload-zone">${icon('upload')}<strong>${pack ? '选择新版压缩包（可选）' : '点击选择题库压缩包'}</strong><span>ZIP / 7Z / RAR / QBank · 最大 ${maxArchiveMB} MB</span><input id="archive-input" type="file" name="archive" accept=".zip,.7z,.rar,.qbank" ${pack ? '' : 'required'} aria-label="选择题库压缩包"></label><p id="archive-selection" class="file-selection">${pack ? `当前文件：${esc(pack.archive.name)}（不选择则保留）` : ''}</p></section><section class="form-section"><div class="section-title"><span class="section-number">03</span>截图展示 <span class="count">选填</span></div><label class="upload-zone">${icon('image')}<strong>添加题库截图</strong><span>PNG / JPEG / WebP · 每张最大 3 MB · 最多 6 张</span><input id="screenshots-input" type="file" accept="image/png,image/jpeg,image/webp" multiple aria-label="添加题库截图"></label><div class="preview-grid" id="preview-grid"></div><p class="field-help">展示真实题目和使用界面，上传前请遮盖姓名、手机号等个人信息。</p></section><label class="rights"><input type="checkbox" name="rights" value="yes" required><span>我确认有权分享题库和截图，内容不包含未经授权的付费资料或个人敏感信息，并同意<a href="#" data-action="guidelines">分享须知</a>。</span></label><p class="form-error" role="alert"></p><div class="form-bottom"><span>${pack ? '保存后会立即更新题库页面' : '提交后会出现在题库广场'}</span><a class="button secondary" href="${pack ? '#pack/' + pack.id : '#library'}">取消</a><button type="submit" class="button">${icon('upload')}${pack ? '保存修改' : '发布题库'}</button></div></form></div>`;
+  previews();
+}
+function previews() {
+  previewUrls.forEach(URL.revokeObjectURL); previewUrls = [];
+  const existing = (upload.pack?.screenshots || []).filter(f => upload.keep.includes(f.id));
+  $('#preview-grid').innerHTML = existing.map(f => `<div class="preview-item"><img src="/media/${f.id}" alt="已有截图"><button type="button" data-remove-existing="${f.id}" aria-label="移除已有截图">×</button></div>`).join('') + upload.pictures.map((f, i) => { const url = URL.createObjectURL(f); previewUrls.push(url); return `<div class="preview-item"><img src="${url}" alt="${esc(f.name)}"><button type="button" data-remove-picture="${i}" aria-label="移除截图">×</button></div>`; }).join('');
+}
+async function reports(stamp) {
+  const result = await api('/api/reports'); if (stamp !== turn) return;
+  app.innerHTML = `<div class="breadcrumb"><a href="#library">题库广场</a><span>/</span><span>管理</span></div><h1 class="page-title">举报与下载预算</h1><p class="page-subtitle">本期 ${esc(result.traffic.period)}，附件预留用量 ${size(result.traffic.reservedBytes)} / ${size(result.traffic.budgetBytes)}。计数包含中断请求，不等同于阿里云实际流量。</p>${result.reports.length ? result.reports.map(r => `<article class="report-card"><h3><a href="#pack/${r.pack_id}">${esc(r.title)} ↗</a></h3><p>${esc(r.reason)}</p><div class="subtle">${esc(r.author)} · ${new Date(r.created).toLocaleString('zh-CN')}</div></article>`).join('') : empty('目前没有举报', '用户提交的题库举报会出现在这里。', '')}`;
+}
+function showAuth(mode = 'login', target = null) {
+  clearCaptcha();
+  authTarget = target;
+  $('#auth-content').innerHTML = `<h2 id="auth-title">${mode === 'register' ? '欢迎加入题库广场' : '欢迎回来'}</h2><p class="dialog-intro">登录后，分享你的题库，与同路人交流。</p><div class="auth-tabs"><button class="${mode === 'login' ? 'active' : ''}" data-auth-mode="login">登录</button><button class="${mode === 'register' ? 'active' : ''}" data-auth-mode="register">注册账号</button></div><form id="auth-form" data-mode="${mode}">${mode === 'register' ? '<div class="field"><label for="auth-name">昵称</label><input id="auth-name" name="name" required maxlength="30" autocomplete="nickname" placeholder="大家会看到这个名字"></div>' : ''}<div class="field"><label for="auth-email">邮箱</label><input id="auth-email" name="email" type="email" required maxlength="180" autocomplete="email" placeholder="you@example.com"></div><div class="field"><label for="auth-password">密码</label><input id="auth-password" name="password" type="password" required minlength="10" maxlength="128" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}" placeholder="至少 10 个字符"></div><p class="form-error" role="alert"></p><button type="submit" class="button">${mode === 'register' ? '注册并登录' : '登录'}</button><p class="auth-note">邮箱仅用于账号登录，不会展示在题库和评论中。当前版本暂不支持邮箱验证和自助密码找回。</p></form>`;
+  if (!$('#auth-dialog').open) $('#auth-dialog').showModal();
+  if (mode === 'register') {
+    const passwordField = $('#auth-password').closest('.field');
+    passwordField.insertAdjacentHTML('beforebegin', `<div class="field"><label for="auth-code">邮箱验证码</label><div class="email-code-row"><input id="auth-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required placeholder="6 位验证码"><button type="button" id="send-email-code" data-action="send-email-code" class="button secondary small" disabled>获取验证码</button></div></div>${registrationReady ? '<div id="register-captcha" class="register-captcha" aria-label="人机验证"></div>' : '<p class="auth-note" role="status">注册暂未开放，请稍后再来。已有账号仍可登录。</p>'}`);
+    $('#auth-form button[type="submit"]').disabled = !registrationReady;
+    $('#auth-email').addEventListener('input', updateCodeButton);
+    mountCaptcha();
+  }
+  $('#auth-form .auth-note:last-child').textContent = '邮箱仅用于登录和注册验证，不会展示在题库和评论中。暂不支持自助密码找回。';
+}
+function message(title, html) { $('#message-content').innerHTML = `<h2 id="message-title">${title}</h2>${html}`; $('#message-dialog').showModal(); }
+function guidelines() { message('分享须知', '<div class="guidelines"><p><strong>分享有权公开的内容。</strong><br>请注明资料来源，不上传未经授权的付费题库、教材扫描件或个人敏感信息。</p><p><strong>让文件可用，让介绍清楚。</strong><br>请检查压缩包与截图，说明适用版本和导入方式。服务器不会自动解压文件，也不会验证题库内容。</p><p><strong>保持友善交流。</strong><br>评论用于提问和反馈，请勿发布广告、攻击性内容或个人信息。</p><p><strong>发现问题及时举报。</strong><br>题库详情页可提交举报。管理员可以下架题库、删除不当评论。</p><p>此页面是试用版分享说明，正式公开运营前需补充完整的服务协议、隐私政策和联系渠道。</p></div>'); }
+async function render() {
+  const stamp = ++turn; const [view = 'library', id] = location.hash.slice(1).split('/');
+  document.title = 'QuizForge · 题库广场'; currentPack = null;
+  previewUrls.forEach(URL.revokeObjectURL); previewUrls = [];
+  document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === view));
+  if (['upload', 'edit', 'mine', 'reports'].includes(view) && !user) {
+    app.innerHTML = empty('登录后继续', '使用独立账号，管理自己的分享和评论。', '<button class="button" data-action="login">登录 / 注册</button>'); showAuth('login', location.hash); return;
+  }
+  app.innerHTML = '<div class="loading" role="status">正在加载…</div>';
+  try {
+    if (view === 'pack' && /^[a-f0-9-]{36}$/.test(id)) await detail(id, stamp);
+    else if (view === 'edit' && /^[a-f0-9-]{36}$/.test(id)) { const result = await api('/api/packs/' + id); if (stamp !== turn) return; if (result.pack.user_id !== user.id) throw new Error('只能编辑自己发布的题库'); uploadForm(result.pack); }
+    else if (view === 'upload') uploadForm(null);
+    else if (view === 'reports') await reports(stamp);
+    else await library(view === 'mine', stamp);
+  } catch (error) { if (stamp === turn) app.innerHTML = empty('暂时无法打开', esc(error.message), '<button class="button small" data-action="retry">重试</button><a href="#library" class="text-button">返回广场</a>'); }
+}
+
+document.addEventListener('click', async event => {
+  const element = event.target.closest('button,a'); if (!element) return;
+  try {
+    if (element.dataset.authMode) { showAuth(element.dataset.authMode, authTarget); return; }
+    if (element.dataset.page) { filters.page = Number(element.dataset.page); await render(); app.scrollIntoView({ block: 'start' }); return; }
+    if (element.dataset.image) { $('#large-image').src = element.dataset.image; $('#image-dialog').showModal(); return; }
+    if (element.dataset.removeExisting) { upload.keep = upload.keep.filter(id => id !== element.dataset.removeExisting); previews(); return; }
+    if (element.hasAttribute('data-remove-picture')) { upload.pictures.splice(Number(element.dataset.removePicture), 1); previews(); return; }
+    if (element.dataset.deleteComment) { message('删除这条评论？', `<p class="dialog-intro">删除后无法恢复。</p><button class="button" data-confirm-comment="${element.dataset.deleteComment}">确认删除</button>`); return; }
+    if (element.dataset.confirmComment) { await api('/api/comments/' + element.dataset.confirmComment, { method: 'DELETE' }); $('#message-dialog').close(); toast('评论已删除'); await render(); return; }
+    const action = element.dataset.action;
+    if (!action) return; event.preventDefault();
+    if (action === 'close-dialog') { element.closest('dialog').close(); return; }
+    if (action === 'login') { showAuth('login', location.hash); return; }
+    if (action === 'send-email-code') { await sendEmailCode(); return; }
+    if (action === 'logout') { await api('/api/auth/logout', { method: 'POST' }); user = null; account(); toast('已退出登录'); if (location.hash === '#library') await render(); else location.hash = '#library'; return; }
+    if (action === 'guidelines') { guidelines(); return; }
+    if (action === 'reset-search') { filters = { q: '', sort: 'latest', page: 1 }; await render(); return; }
+    if (action === 'retry') { await render(); return; }
+    if (action === 'download') {
+      const pack = currentPack; element.disabled = true; element.textContent = '下载中…';
+      try {
+        await api('/api/packs/' + pack.id + '/download-status');
+        const link = document.createElement('a'); link.href = '/api/packs/' + pack.id + '/download'; link.download = pack.archive.name; document.body.append(link); link.click(); link.remove(); toast('已请求下载，请查看浏览器下载记录');
+      } finally { element.disabled = false; element.innerHTML = icon('download') + '下载压缩包'; }
+      return;
+    }
+    if (action === 'report') { if (!user) { showAuth('login', location.hash); return; } message('举报题库内容', '<p class="dialog-intro">请说明侵权、文件风险或其他问题，管理员会查看举报。</p><form class="report-form" id="report-form"><label for="report-reason" class="subtle">举报原因</label><textarea id="report-reason" name="reason" maxlength="1000" required rows="5"></textarea><p class="form-error" role="alert"></p><button type="submit" class="button">提交举报</button></form>'); return; }
+    if (action === 'delete-pack') { message('下架这份题库？', '<p class="dialog-intro">题库、压缩包、截图和评论会一起删除，此操作无法恢复。</p><button class="button" data-action="confirm-delete-pack">确认下架</button>'); return; }
+    if (action === 'confirm-delete-pack') { await api('/api/packs/' + currentPack.id, { method: 'DELETE' }); $('#message-dialog').close(); toast('题库已下架'); location.hash = '#library'; }
+  } catch (error) { toast(error.message); }
+});
+document.addEventListener('change', event => {
+  const el = event.target;
+  if (el.id === 'sort') { filters.sort = el.value; filters.page = 1; render(); }
+  if (el.id === 'archive-input') { const file = el.files[0]; if (file?.size > maxArchiveMB * 1024 * 1024) { el.value = ''; $('#archive-selection').textContent = ''; toast(`压缩包不能超过 ${maxArchiveMB} MB`); return; } $('#archive-selection').textContent = file ? `${file.name} · ${size(file.size)}` : upload.pack ? `当前文件：${upload.pack.archive.name}（不选择则保留）` : ''; }
+  if (el.id === 'screenshots-input') {
+    const files = [...el.files];
+    if (files.length + upload.pictures.length + upload.keep.length > 6) toast('最多添加 6 张截图');
+    else if (files.some(f => f.size > 3 * 1024 * 1024)) toast('每张截图不能超过 3 MB');
+    else { upload.pictures.push(...files); previews(); }
+    el.value = '';
+  }
+});
+document.addEventListener('submit', async event => {
+  const form = event.target; event.preventDefault();
+  if (form.id === 'search-form') { filters.q = new FormData(form).get('q').trim(); filters.page = 1; await render(); return; }
+  const button = form.querySelector('button[type="submit"]'); const errorNode = form.querySelector('.form-error');
+  if (!button) return; button.disabled = true; if (errorNode) errorNode.textContent = '';
+  try {
+    if (form.id === 'auth-form') {
+      const data = Object.fromEntries(new FormData(form)); const result = await api('/api/auth/' + form.dataset.mode, jsonOptions(data));
+      user = result.user; account(); $('#auth-dialog').close(); toast('登录成功');
+      if (authTarget && location.hash !== authTarget) location.hash = authTarget; else await render();
+    } else if (form.id === 'upload-form') {
+      const data = new FormData(form); data.set('keepScreenshots', JSON.stringify(upload.keep));
+      for (const file of upload.pictures) data.append('screenshots', file);
+      const result = await api('/api/packs' + (upload.pack ? '/' + upload.pack.id : ''), { method: upload.pack ? 'PUT' : 'POST', body: data });
+      toast(upload.pack ? '题库已更新' : '题库发布成功'); location.hash = '#pack/' + result.pack.id;
+    } else if (form.id === 'comment-form') { await api('/api/packs/' + currentPack.id + '/comments', jsonOptions({ body: new FormData(form).get('body') })); toast('评论已发布'); await render(); }
+    else if (form.id === 'report-form') { await api('/api/packs/' + currentPack.id + '/report', jsonOptions({ reason: new FormData(form).get('reason') })); $('#message-dialog').close(); toast('举报已提交'); }
+  } catch (error) { if (errorNode) errorNode.textContent = error.message; else toast(error.message); }
+  finally { button.disabled = form.id === 'auth-form' && form.dataset.mode === 'register' && !registrationReady; }
+});
+window.addEventListener('hashchange', () => { document.querySelectorAll('dialog[open]').forEach(d => d.close()); window.scrollTo(0, 0); render(); });
+for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', event => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } });
+$('#auth-dialog').addEventListener('close', clearCaptcha);
+try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; } catch (error) { toast(error.message); }
+account(); await render();

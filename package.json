@@ -1,0 +1,9 @@
+{
+  "name": "quizforge-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "独立的 QuizForge 题库分享网站",
+  "engines": { "node": ">=24.13.0 <25" },
+  "scripts": { "start": "node server.mjs", "dev": "node --watch server.mjs", "test": "node --test test/*.test.mjs" }
+}

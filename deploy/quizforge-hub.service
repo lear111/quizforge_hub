@@ -1,0 +1,34 @@
+[Unit]
+Description=QuizForge question-bank sharing site
+After=network.target
+
+[Service]
+Type=simple
+User=quizforge
+Group=quizforge
+WorkingDirectory=/opt/quizforge-hub/current
+ExecStart=/opt/quizforge-node/bin/node /opt/quizforge-hub/current/server.mjs
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=4318
+Environment=DATA_DIR=/var/lib/quizforge-hub
+Environment=PUBLIC_ORIGIN=https://quizforge.treenewbee.cloud
+Environment=COOKIE_SECURE=1
+Environment=TRUST_PROXY=1
+Environment=MONTHLY_FILE_BUDGET_GB=150
+Environment=BILLING_TIMEZONE=Asia/Shanghai
+EnvironmentFile=-/etc/quizforge-hub/mail.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/quizforge-hub
+UMask=0077
+MemoryHigh=320M
+MemoryMax=384M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target
