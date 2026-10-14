@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { mailSettings, createMailProvider } from './mail.mjs';
 import { createEmailCodes, EmailCodeError } from './email-codes.mjs';
+import { createReviewNotifications } from './review-notifications.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
@@ -41,7 +42,20 @@ export async function createApp(options = {}) {
     CREATE INDEX IF NOT EXISTS files_pack ON files(pack_id);
     CREATE INDEX IF NOT EXISTS comments_pack ON comments(pack_id, created);
   `);
-  const emailCodes = createEmailCodes(db, options.mailProvider || createMailProvider(mailSettings()), options.now);
+  // A legacy published pack also enters review when moderation is first enabled.
+  const columns = new Set(db.prepare('PRAGMA table_info(packs)').all().map(c => c.name));
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const [name, definition] of Object.entries({ status: "TEXT NOT NULL DEFAULT 'pending'", revision: 'INTEGER NOT NULL DEFAULT 1', review_note: "TEXT NOT NULL DEFAULT ''", reviewed_by: 'TEXT', reviewed_at: 'TEXT' })) {
+      if (!columns.has(name)) db.exec(`ALTER TABLE packs ADD COLUMN ${name} ${definition}`);
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS pack_reviews (id TEXT PRIMARY KEY, pack_id TEXT NOT NULL REFERENCES packs(id) ON DELETE CASCADE, revision INTEGER NOT NULL, decision TEXT NOT NULL, note TEXT NOT NULL, reviewer_id TEXT NOT NULL REFERENCES users(id), created TEXT NOT NULL)`);
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  const reviewEmail = options.reviewEmail ?? process.env.REVIEW_EMAIL ?? '';
+  const provider = options.mailProvider || createMailProvider(mailSettings());
+  const reviewNotifier = createReviewNotifications(db, options.reviewNotificationProvider || provider, reviewEmail, options.now);
+  const emailCodes = createEmailCodes(db, provider, options.now);
   const secureCookies = options.secureCookies ?? process.env.COOKIE_SECURE === '1';
   const publicOrigin = options.publicOrigin ?? process.env.PUBLIC_ORIGIN;
   const archiveLimit = Number(process.env.MAX_ARCHIVE_MB || 20) * MB;
@@ -76,6 +90,7 @@ export async function createApp(options = {}) {
     return db.prepare('SELECT u.id,u.name,u.email,u.admin FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?').get(hash(raw), Date.now()) || null;
   };
   const requireUser = req => identity(req) || fail(401, '请先登录');
+  const requireAdmin = req => { const user = requireUser(req); if (!user.admin) fail(403, '仅管理员可审核题库'); return user; };
   const throttle = (req, group, max, userId = '') => {
     const ip = process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
     const key = `${group}:${userId || ip}`;
@@ -115,6 +130,11 @@ export async function createApp(options = {}) {
     cookie(res, token);
   };
   const packRow = id => db.prepare('SELECT p.*,u.name AS author FROM packs p JOIN users u ON u.id=p.user_id WHERE p.id=?').get(id) || fail(404, '题库不存在或已下架');
+  const readable = (req, row) => {
+    const user = identity(req);
+    if (row.status !== 'approved' && row.user_id !== user?.id && !user?.admin) fail(404, '题库不存在或尚未通过审核');
+    return row;
+  };
   const packDto = row => {
     const files = db.prepare('SELECT id,kind,name,mime,size,sha256 FROM files WHERE pack_id=? ORDER BY rowid').all(row.id);
     return { ...row, tags: JSON.parse(row.tags), archive: files.find(f => f.kind === 'archive'), screenshots: files.filter(f => f.kind === 'image'), commentCount: db.prepare('SELECT COUNT(*) AS n FROM comments WHERE pack_id=?').get(row.id).n };
@@ -183,14 +203,17 @@ export async function createApp(options = {}) {
       for (const f of newFiles) { await writeFile(path.join(uploadDir, f.id), f.bytes, { flag: 'wx' }); written.push(f.id); }
       db.exec('BEGIN IMMEDIATE');
       try {
-        if (previous) db.prepare('UPDATE packs SET title=?,summary=?,description=?,category=?,tags=?,version=?,updated=? WHERE id=?').run(values.title, values.summary, values.description, values.category, JSON.stringify(values.tags), values.version, now, id);
+        if (previous) db.prepare("UPDATE packs SET title=?,summary=?,description=?,category=?,tags=?,version=?,updated=?,status='pending',revision=revision+1,review_note='',reviewed_by=NULL,reviewed_at=NULL WHERE id=?").run(values.title, values.summary, values.description, values.category, JSON.stringify(values.tags), values.version, now, id);
         else db.prepare('INSERT INTO packs (id,user_id,title,summary,description,category,tags,version,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id, user.id, values.title, values.summary, values.description, values.category, JSON.stringify(values.tags), values.version, now, now);
         for (const f of removed) db.prepare('DELETE FROM files WHERE id=?').run(f.id);
         for (const f of newFiles) db.prepare('INSERT INTO files VALUES (?,?,?,?,?,?,?)').run(f.id, id, f.kind, f.name, f.mime, f.size, f.sha256);
+        reviewNotifier.enqueue();
         db.exec('COMMIT');
       } catch (e) { db.exec('ROLLBACK'); throw e; }
       written.length = 0;
       for (const f of removed) await unlink(path.join(uploadDir, f.id)).catch(() => {});
+      // Notification delivery never makes a successfully saved submission fail.
+      if (reviewNotifier) reviewNotifier.wake();
       json(res, previous ? 200 : 201, { pack: packDto(packRow(id)) });
     } finally {
       for (const id of written) await unlink(path.join(uploadDir, id)).catch(() => {});
@@ -255,6 +278,7 @@ export async function createApp(options = {}) {
         const query = (url.searchParams.get('q') || '').trim().slice(0, 100);
         if (query) { conditions.push('(p.title LIKE ? ESCAPE \'!\' OR p.summary LIKE ? ESCAPE \'!\' OR p.tags LIKE ? ESCAPE \'!\')'); const pattern = `%${query.replace(/[!%_]/g, '!$&')}%`; params.push(pattern, pattern, pattern); }
         if (url.searchParams.get('mine') === '1') { conditions.push('p.user_id=?'); params.push(requireUser(req).id); }
+        else conditions.push("p.status='approved'");
         const where = conditions.length ? ' WHERE ' + conditions.join(' AND ') : '';
         const order = url.searchParams.get('sort') === 'popular' ? 'p.downloads DESC,p.updated DESC' : 'p.updated DESC';
         const page = Math.max(1, Math.min(100000, parseInt(url.searchParams.get('page') || '1') || 1));
@@ -263,9 +287,25 @@ export async function createApp(options = {}) {
         json(res, 200, { packs: rows.map(packDto), count, page }); return;
       }
       if (pathname === '/api/packs' && req.method === 'POST') { await handleUpload(req, res); return; }
-      const match = /^\/api\/packs\/([a-f0-9-]{36})(?:\/(comments|download|download-status|report))?$/.exec(pathname);
+      const match = /^\/api\/packs\/([a-f0-9-]{36})(?:\/(comments|download|download-status|report|review))?$/.exec(pathname);
       if (match) {
         const [, id, action] = match; const row = packRow(id);
+        if (action === 'review' && req.method === 'POST') {
+          const admin = requireAdmin(req); const input = await bodyJson(req);
+          if (!['approved', 'rejected'].includes(input.decision)) fail(400, '请选择通过或驳回');
+          if (!Number.isSafeInteger(input.revision) || input.revision < 1) fail(400, '审核版本无效');
+          const note = text(input.note ?? '', '审核说明', 1000, input.decision === 'rejected');
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            const changed = db.prepare("UPDATE packs SET status=?,review_note=?,reviewed_by=?,reviewed_at=? WHERE id=? AND revision=? AND status='pending'").run(input.decision, note, admin.id, iso(), id, input.revision);
+            if (!changed.changes) fail(409, '题库已修改或已审核，请刷新后重新查看');
+            db.prepare('INSERT INTO pack_reviews VALUES (?,?,?,?,?,?,?)').run(randomUUID(), id, input.revision, input.decision, note, admin.id, iso());
+            db.exec('COMMIT');
+          } catch (error) { db.exec('ROLLBACK'); throw error; }
+          json(res, 200, { pack: packDto(packRow(id)) }); return;
+        }
+        if (['GET', 'HEAD'].includes(req.method) || ['comments', 'report'].includes(action)) readable(req, row);
+        if (['comments', 'report'].includes(action) && row.status !== 'approved') fail(409, '题库通过审核后才能评论或举报');
         if (!action && req.method === 'GET') {
           const comments = db.prepare('SELECT c.id,c.user_id,c.body,c.created,u.name AS author FROM comments c JOIN users u ON u.id=c.user_id WHERE c.pack_id=? ORDER BY c.created DESC LIMIT 100').all(id);
           json(res, 200, { pack: packDto(row), comments }); return;
@@ -316,12 +356,22 @@ export async function createApp(options = {}) {
         if (!requireUser(req).admin) fail(403, '仅管理员可查看举报');
         json(res, 200, { reports: db.prepare('SELECT r.*,p.title,u.name AS author FROM reports r JOIN packs p ON p.id=r.pack_id JOIN users u ON u.id=r.user_id ORDER BY r.created DESC LIMIT 100').all(), traffic: { period: month(), reservedBytes: db.prepare('SELECT bytes FROM traffic WHERE period=?').get(month())?.bytes || 0, budgetBytes: monthlyBudget } }); return;
       }
+      if (pathname === '/api/reviews' && req.method === 'GET') {
+        requireAdmin(req);
+        const status = url.searchParams.get('status') || 'pending';
+        if (!['pending', 'approved', 'rejected'].includes(status)) fail(400, '审核状态无效');
+        const page = Math.max(1, Math.min(100000, parseInt(url.searchParams.get('page') || '1') || 1));
+        const count = db.prepare('SELECT COUNT(*) AS n FROM packs WHERE status=?').get(status).n;
+        const rows = db.prepare('SELECT p.*,u.name AS author FROM packs p JOIN users u ON u.id=p.user_id WHERE status=? ORDER BY updated DESC LIMIT 12 OFFSET ?').all(status, (page - 1) * 12);
+        json(res, 200, { packs: rows.map(packDto), count, page, status, reviewEmail, notification: reviewNotifier?.state() ?? { ready: false } }); return;
+      }
       const imageMatch = /^\/media\/([a-f0-9-]{36})$/.exec(pathname);
       if (imageMatch && req.method === 'GET') {
         const file = db.prepare("SELECT * FROM files WHERE id=? AND kind='image'").get(imageMatch[1]) || fail(404, '图片不存在');
+        readable(req, packRow(file.pack_id));
         await stat(path.join(uploadDir, file.id));
         throttle(req, 'image', 180); reserveTraffic(req, file.size);
-        res.writeHead(200, { 'Content-Type': file.mime, 'Content-Length': file.size, 'Cache-Control': 'public, max-age=3600' });
+        res.writeHead(200, { 'Content-Type': file.mime, 'Content-Length': file.size, 'Cache-Control': 'private, no-store' });
         await pipeline(createReadStream(path.join(uploadDir, file.id)), res); return;
       }
       if (['GET', 'HEAD'].includes(req.method) && !pathname.startsWith('/api/')) {
@@ -338,7 +388,7 @@ export async function createApp(options = {}) {
     }
   });
   server.requestTimeout = 45000; server.headersTimeout = 10000;
-  server.on('close', () => { clearInterval(sweep); db.close(); });
+  server.on('close', () => { clearInterval(sweep); reviewNotifier.stop(); db.close(); });
   return { server, dataDir };
 }
 

@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../server.mjs';
+import { DatabaseSync } from 'node:sqlite';
 
 const zip = Buffer.from('504b0506000000000000000000000000000000000000', 'hex');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7u0AAAAASUVORK5CYII=', 'base64');
@@ -17,6 +18,8 @@ async function start(dataDir, monthlyBudgetBytes) {
   const close = () => new Promise(resolve => { server.close(resolve); server.closeIdleConnections(); });
   return { request, close, origin, codes };
 }
+function promote(dataDir, user) { const db = new DatabaseSync(path.join(dataDir, 'hub.sqlite')); db.prepare('UPDATE users SET admin=1 WHERE id=?').run(user.id); db.close(); }
+async function approve(app, pack, admin) { const result = await app.request('/api/packs/'+pack.id+'/review', json({ decision:'approved', revision:pack.revision },admin.cookie)); assert.equal(result.status,200,await result.clone().text()); }
 const json = (body, cookie, method = 'POST') => ({ method, cookie, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 async function register(app, email, name = '作者') {
   assert.equal((await app.request('/api/auth/email-code', json({ email, captchaToken: 'test' }))).status, 200);
@@ -41,6 +44,7 @@ test('真实上传下载、作者权限、评论举报、修改和重启恢复',
   t.after(async () => { await app.close(); await rm(dataDir, { recursive: true, force: true }); });
   const alice = await register(app, 'alice@example.test');
   const bob = await register(app, 'bob@example.test', '读者');
+  const admin = await register(app, 'admin@example.test','审核员'); promote(dataDir,admin.user);
   let pack;
   await t.test('匿名可浏览，必须登录才能上传', async () => {
     assert.equal((await app.request('/')).status, 200);
@@ -56,10 +60,24 @@ test('真实上传下载、作者权限、评论举报、修改和重启恢复',
     assert.equal(res.status, 201); pack = (await res.json()).pack;
     assert.equal(pack.user_id, alice.user.id); assert.equal(pack.screenshots.length, 1);
     assert.equal(pack.archive.size, zip.length); assert.equal(pack.archive.sha256.length, 64);
+    assert.equal(pack.status, 'pending');
+    assert.equal((await (await app.request('/api/packs')).json()).count, 0);
+    for (const route of [`/api/packs/${pack.id}`,`/api/packs/${pack.id}/download`,`/api/packs/${pack.id}/download-status`,`/media/${pack.screenshots[0].id}`]) {
+      assert.equal((await app.request(route)).status,404);
+      assert.equal((await app.request(route,{cookie:bob.cookie})).status,404);
+      assert.equal((await app.request(route,{cookie:alice.cookie})).status,200);
+    }
+    assert.equal((await (await app.request('/api/packs?mine=1',{cookie:alice.cookie})).json()).count,1);
+    assert.equal((await app.request('/api/reviews',{cookie:bob.cookie})).status,403);
+    assert.equal((await app.request('/api/reviews')).status,401);
+    assert.equal((await (await app.request('/api/reviews',{cookie:admin.cookie})).json()).count,1);
+    assert.equal((await app.request(`/api/packs/${pack.id}/review`,json({decision:'approved',revision:pack.revision},bob.cookie))).status,403);
+    assert.equal((await app.request(`/api/packs/${pack.id}/comments`,json({body:'未审核评论'},alice.cookie))).status,409);
+    await approve(app,pack,admin);
     assert.deepEqual(Buffer.from(await (await app.request(`/api/packs/${pack.id}/download`)).arrayBuffer()), zip);
     assert.deepEqual(Buffer.from(await (await app.request(`/media/${pack.screenshots[0].id}`)).arrayBuffer()), png);
     const list = await (await app.request('/api/packs?q=离散')).json();
-    assert.equal(list.count, 1); assert.equal(list.packs[0].downloads, 1);
+    assert.equal(list.count, 1); assert.equal(list.packs[0].downloads, 2);
     assert.equal(JSON.stringify(list).includes('alice@example'), false);
   });
   await t.test('其他账号不能编辑、删除或删除他人评论', async () => {
@@ -80,6 +98,21 @@ test('真实上传下载、作者权限、评论举报、修改和重启恢复',
     assert.equal(res.status, 200); const changed = (await res.json()).pack;
     assert.equal(changed.archive.id, pack.archive.id); assert.equal(changed.screenshots[0].id, pack.screenshots[0].id);
     assert.equal(changed.title, '离散数学 · 第二版');
+    assert.equal(changed.status,'pending'); assert.equal(changed.revision,pack.revision+1);
+    assert.equal((await app.request(`/api/packs/${pack.id}/download`)).status,404);
+    assert.equal((await app.request(`/media/${pack.screenshots[0].id}`)).status,404);
+    assert.equal((await app.request(`/api/packs/${pack.id}/review`,json({decision:'approved',revision:pack.revision},admin.cookie))).status,409);
+    assert.equal((await app.request(`/api/packs/${pack.id}/review`,json({decision:'rejected',revision:changed.revision,note:' '},admin.cookie))).status,400);
+    assert.equal((await app.request(`/api/packs/${pack.id}/review`,json({decision:'rejected',revision:changed.revision,note:'请补充资料来源'},admin.cookie))).status,200);
+    assert.equal((await (await app.request(`/api/packs/${pack.id}`,{cookie:alice.cookie})).json()).pack.review_note,'请补充资料来源');
+    assert.equal((await app.request(`/api/packs/${pack.id}`)).status,404);
+    assert.equal((await app.request(`/api/packs/${pack.id}/review`,json({decision:'approved',revision:changed.revision},admin.cookie))).status,409);
+    const submission = await app.request(`/api/packs/${pack.id}`,{method:'PUT',cookie:alice.cookie,body:uploadForm({title:'离散数学 · 第二版',archive:null,screenshot:false,keep:[pack.screenshots[0].id]})});
+    const resubmitted = (await submission.json()).pack;
+    assert.equal(resubmitted.review_note,''); assert.equal(resubmitted.revision,changed.revision+1);
+    await approve(app,resubmitted,admin);
+    const audit = new DatabaseSync(path.join(dataDir,'hub.sqlite'),{readOnly:true});
+    assert.equal(audit.prepare('SELECT COUNT(*) AS n FROM pack_reviews WHERE pack_id=?').get(pack.id).n,3); audit.close();
   });
   await t.test('重启后账号、会话、文件和评论仍存在', async () => {
     await app.close(); app = await start(dataDir);
@@ -107,7 +140,7 @@ test('附件下载预算是持久化硬限制，重启不重置', async t => {
   t.after(async () => { await app.close(); await rm(dataDir, { recursive: true, force: true }); });
   const author = await register(app, 'budget@example.test');
   const res = await app.request('/api/packs', { method: 'POST', cookie: author.cookie, body: uploadForm({ screenshot: false }) });
-  const { pack } = await res.json(); const route = `/api/packs/${pack.id}/download`;
+  const { pack } = await res.json(); promote(dataDir,author.user); await approve(app,pack,author); const route = `/api/packs/${pack.id}/download`;
   assert.equal((await app.request(`/api/packs/${pack.id}/download-status`)).status, 200);
   for (let i = 0; i < 2; i++) { const res = await app.request(route); assert.equal(res.status, 200); await res.arrayBuffer(); }
   assert.equal((await app.request(route)).status, 429);
@@ -115,4 +148,27 @@ test('附件下载预算是持久化硬限制，重启不重置', async t => {
   await app.close(); app = await start(dataDir, zip.length * 2);
   assert.equal((await app.request(route)).status, 429);
   assert.equal((await app.request('/api/packs')).status, 200);
+});
+
+test('旧数据库迁移：已有题库进入待审，批准后重启不会重新待审，替换文件再次隐藏', async t => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'quizforge-review-migration-'));
+  let app = await start(dataDir);
+  t.after(async () => { await app.close(); await rm(dataDir,{recursive:true,force:true}); });
+  const author = await register(app,'legacy@example.test'); promote(dataDir,author.user);
+  let pack = (await (await app.request('/api/packs',{method:'POST',cookie:author.cookie,body:uploadForm()})).json()).pack;
+  await approve(app,pack,author); await app.close();
+  const legacy = new DatabaseSync(path.join(dataDir,'hub.sqlite'));
+  for (const name of ['status','revision','review_note','reviewed_by','reviewed_at']) legacy.exec('ALTER TABLE packs DROP COLUMN '+name);
+  legacy.close(); app = await start(dataDir);
+  assert.equal((await app.request(`/api/packs/${pack.id}`)).status,404);
+  pack = (await (await app.request(`/api/packs/${pack.id}`,{cookie:author.cookie})).json()).pack;
+  assert.equal(pack.status,'pending'); assert.equal(pack.archive.size,zip.length);
+  await approve(app,pack,author); await app.close(); app=await start(dataDir);
+  assert.equal((await app.request(`/api/packs/${pack.id}`)).status,200);
+  const replacement=Buffer.concat([zip,Buffer.from('new version')]);
+  const changed=(await (await app.request(`/api/packs/${pack.id}`,{method:'PUT',cookie:author.cookie,body:uploadForm({archive:replacement,screenshot:false,keep:[]})})).json()).pack;
+  assert.equal(changed.status,'pending'); assert.notEqual(changed.archive.id,pack.archive.id);
+  assert.equal((await app.request(`/api/packs/${pack.id}/download`)).status,404);
+  await approve(app,changed,author);
+  assert.deepEqual(Buffer.from(await (await app.request(`/api/packs/${pack.id}/download`)).arrayBuffer()),replacement);
 });

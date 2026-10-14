@@ -2,6 +2,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from '../server.mjs';
+import { DatabaseSync } from 'node:sqlite';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = path.join(root, '.sites-runtime', 'browser-qa');
 const codes = new Map();
@@ -21,7 +22,9 @@ if (!response.ok) {
 }
 if (!response.ok) throw new Error('Cannot create isolated UI fixture');
 const cookie = response.headers.get('set-cookie').split(';')[0];
-const existing = await (await fetch(origin + '/api/packs')).json();
+const db = new DatabaseSync(path.join(dataDir,'hub.sqlite'));
+db.prepare('UPDATE users SET admin=1 WHERE email=?').run(account.email); db.close();
+const existing = await (await fetch(origin + '/api/packs?mine=1',{headers:{Cookie:cookie}})).json();
 if (!existing.count) {
   const data = new FormData();
   const fields = { title: '界面验收样例 · 离散数学基础练习', summary: '用于验证题库展示、上传编辑、下载和评论交互，不是正式题库。', description: '这是专用测试环境中的界面验收样例。\n\n演示范围：集合与关系、图论、命题逻辑。\n附件为测试用空 ZIP，不含真实题目，请勿作为学习资料使用。', category: '大学课程', version: '1.0', tags: '离散数学, 界面验收, 非正式资料', rights: 'yes' };

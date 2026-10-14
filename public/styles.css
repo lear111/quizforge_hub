@@ -25,3 +25,6 @@
 .dialog{box-shadow:0 24px 80px #35254f1a}
 @media(max-width:760px){.brand{font-size:18px}.brand-icon{width:34px;height:34px}.brand small{font-size:9px;letter-spacing:.3px}}
 @media(max-width:420px){.brand{font-size:17px}}
+
+.review-status{display:inline-block;padding:3px 9px;margin-bottom:10px;border-radius:6px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent)}.review-status.rejected{color:#a24137;background:#fff0ee}.review-status.approved{color:#594888;background:#f1eef9}.review-notice{border:1px solid var(--line);background:var(--accent-soft);padding:16px 20px;border-radius:12px;margin-bottom:24px}.review-notice p{margin:6px 0;overflow-wrap:anywhere}.review-settings{display:flex;flex-direction:column;gap:5px;background:white;border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:20px 0;overflow-wrap:anywhere}.review-settings .text-button{align-self:flex-start;white-space:normal}.review-tabs,.review-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:20px 0}.review-panel{background:#fdfbff}.review-panel .review-actions{margin-bottom:0}
+@media(max-width:420px){.header{height:auto;min-height:90px;flex-wrap:wrap;gap:10px;padding-top:14px;padding-bottom:14px}.header-actions{width:100%;margin-left:0;justify-content:flex-end;gap:10px}.header-actions .button{padding:8px 12px}}

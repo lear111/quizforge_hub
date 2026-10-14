@@ -4,7 +4,7 @@
 
 - SSH：`work-codex-seoul`，腾讯云首尔，Ubuntu 24.04.4 / x86_64。
 - 运行时：官方 Node 24.21.0，下载后通过官方 SHA-256 校验，安装在 `/opt/quizforge-node`，没有替换其他服务的 Node 22。
-- 当前代码：`/opt/quizforge-hub/releases/20261010-232142-purple`；`/opt/quizforge-hub/current` 为发布软链接。此前发布 `/opt/quizforge-hub/releases/20261010-221247` 保留。新版使用提供的 QuizForge PNG 图标、浅紫背景与紫色主按钮，线上静态资源的 SHA-256 与本机一致。
+- 当前代码：`/opt/quizforge-hub/releases/20261014-review-v1`；`/opt/quizforge-hub/current` 为发布软链接。此前发布 `/opt/quizforge-hub/releases/20261010-221247` 保留。新版使用提供的 QuizForge PNG 图标、浅紫背景与紫色主按钮，线上静态资源的 SHA-256 与本机一致。
 - 服务：`quizforge-hub.service`，开机自启，专用系统用户 `quizforge`，监听 `127.0.0.1:4318`，内存上限 384 MiB。
 - 数据：`/var/lib/quizforge-hub`，权限 700，部署时为空库。本机账号和数据没有迁移。
 - 邮件配置：`/etc/quizforge-hub/mail.env`，root 所有，权限 600，由 systemd 读取。真实密钥通过 SSH 传输，不在代码发布包中。
@@ -29,3 +29,11 @@ sudo systemctl restart quizforge-hub
 管理员需要在网站注册后另行明确授予，部署没有自动创建管理员。命令见 `README.md`。
 
 Caddy 原配置备份：`/etc/caddy/Caddyfile.before-quizforge-20261010-221651`。这是添加题库站点之前的配置，恢复它会取消题库域名路由；维护时先检查后续其他站点变更再决定是否恢复。当前数据库与附件应作为整体一致性备份，并私密保管邮件配置；当前尚未配置定时异机备份。
+
+## 2026-10-14 审核发布
+
+升级前创建 root 私有 SQLite 在线备份；停服务切换发布前再次备份。新版本保留所有账号、附件、评论和配额，将既有 1 份题库转为待审核。用户明确指定的 `wgs` 账号已授予管理员权限，已核对其注册邮箱。审核提醒收件地址仅写入 root 的私有环境文件。
+
+服务器上 20 项测试全通过；公网列表未展示待审题库，匿名访问该题库详情、下载、下载检查和截图均返回 404，审核接口匿名返回 401。本地与线上核心源文件哈希一致。375px 审核页面验证无横向溢出。
+
+腾讯云控制台登录过期：专用审核提醒模板正文已准备在 `deploy/review-email-template.html`，尚未提交和取得已审核模板 ID。当前网站内审核可用，邮件队列持久保存；提醒邮件尚未启用、未进行真实投递验证。需在控制台提交模板，通过后设置 `TENCENT_SES_REVIEW_TEMPLATE_ID` 并重启。注册验证码模板保持原配置。
