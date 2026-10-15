@@ -21,3 +21,5 @@ sudo -u quizforge env DATA_DIR=/var/lib/quizforge-hub /opt/quizforge-node/bin/no
 邮件配置使用 `/etc/quizforge-hub/mail.env`，从 `mail.env.example` 填写真实配置，文件归 root 所有并设置权限 600，systemd 在启动服务前读取。先保持 `TENCENT_SES_ENABLED=0`；配置真实 Turnstile 站点键和服务端密钥，允许实际网站 hostname，然后执行指定收件邮箱的测试。确认投递及人机验证后启用邮件并重启服务。源码打包必须包含 `mail.mjs` 和 `email-codes.mjs`，不得包含真实密钥文件。
 
 审核版本升级前先一致性备份 SQLite 和附件，保留旧发布目录。新版本首次启动会将旧题库转为待审；旧版本没有访问限制，迁移后不得直接回退旧版本继续公开服务。设置 `REVIEW_EMAIL` 和已审核的 `TENCENT_SES_REVIEW_TEMPLATE_ID` 后重启，再检查管理员页的提醒状态。
+
+临时下载页：在私有环境文件配置 `DOWNLOAD_NOTICE_ENABLED=1`、`DOWNLOAD_NOTICE_URL` 和 `DOWNLOAD_NOTICE_CODE` 后重启。原社区入口为 `/manage/`，审核入口为 `/manage/#reviews`，后台权限规则保持原样。恢复原首页时关闭 `DOWNLOAD_NOTICE_ENABLED`。切换首页不停止后端 API，也不取代完整数据备份。

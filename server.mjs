@@ -27,6 +27,16 @@ const text = (value, label, max, required = true) => {
 };
 
 export async function createApp(options = {}) {
+  const downloadNotice = options.downloadNotice ?? process.env.DOWNLOAD_NOTICE_ENABLED === '1';
+  let noticeUrl = '';
+  const noticeCode = options.downloadNoticeCode ?? process.env.DOWNLOAD_NOTICE_CODE ?? '';
+  if (downloadNotice) {
+    let target;
+    try { target = new URL(options.downloadNoticeUrl ?? process.env.DOWNLOAD_NOTICE_URL); } catch { throw new Error('DownloadNoticeURLInvalid'); }
+    if (target.protocol !== 'https:' || !['pan.quark.cn', 'pan.baidu.com'].includes(target.hostname) || target.username || target.password || target.port || !/^\/s\/[a-zA-Z0-9_-]+\/?$/.test(target.pathname)) throw new Error('DownloadNoticeURLInvalid');
+    if (typeof noticeCode !== 'string' || noticeCode.length > 32) throw new Error('DownloadNoticeCodeInvalid');
+    noticeUrl = target.href;
+  }
   const dataDir = path.resolve(options.dataDir || process.env.DATA_DIR || path.join(root, 'data'));
   const uploadDir = path.join(dataDir, 'files');
   await mkdir(uploadDir, { recursive: true });
@@ -375,9 +385,16 @@ export async function createApp(options = {}) {
         await pipeline(createReadStream(path.join(uploadDir, file.id)), res); return;
       }
       if (['GET', 'HEAD'].includes(req.method) && !pathname.startsWith('/api/')) {
-        const assets = { '/app.js': ['app.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
-        const entry = assets[pathname] || (pathname === '/' ? ['index.html', 'text/html'] : null);
-        if (entry) { const data = await readFile(path.join(root, 'public', entry[0])); res.writeHead(200, { 'Content-Type': entry[1] === 'image/png' ? entry[1] : `${entry[1]}; charset=utf-8`, 'Cache-Control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : data); return; }
+        const assets = { '/app.js': ['app.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/notice.css': ['notice.css', 'text/css'], '/notice.js': ['notice.js', 'text/javascript'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
+        const entry = assets[pathname] || (pathname === '/' ? [downloadNotice ? 'notice.html' : 'index.html', 'text/html'] : pathname === '/manage/' ? ['index.html', 'text/html'] : null);
+        if (entry) {
+          let data = await readFile(path.join(root, 'public', entry[0]));
+          if (entry[0] === 'notice.html') {
+            const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
+            data = Buffer.from(data.toString('utf8').replaceAll('{{DOWNLOAD_URL}}', escape(noticeUrl)).replaceAll('{{DOWNLOAD_CODE}}', escape(noticeCode)).replaceAll('{{PROVIDER}}', new URL(noticeUrl).hostname === 'pan.quark.cn' ? '夸克网盘' : '百度网盘'));
+          }
+          res.writeHead(200, { 'Content-Type': entry[1] === 'image/png' ? entry[1] : `${entry[1]}; charset=utf-8`, 'Cache-Control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : data); return;
+        }
       }
       fail(404, '页面不存在');
     } catch (e) {
