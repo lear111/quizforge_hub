@@ -26,7 +26,9 @@ async function fixture(t) {
     hub.db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(hash(token), user.id, Date.now() + 3600000);
   }
   const identity = async token => (await (await fetch(hubOrigin + '/api/me', { headers: { Cookie: 'qfh_session=' + token } })).json()).user;
-  const practice = await createApp({ dataDir: practiceDir, cloudEnabled: true, cloudRuntimeDir: snapshot, mailProvider: { ready: false }, identityProvider: req => identity((req.headers.cookie || '').replace('qfh_session=', '')) });
+  const practice = await createApp({ dataDir: practiceDir, cloudEnabled: true, cloudRuntimeDir: snapshot, mailProvider: { ready: false }, identityProvider: req => identity((req.headers.cookie || '').replace('qfh_session=', '')),
+    reportActivity: async (req, kind) => { const response = await fetch(hubOrigin + '/internal/activity', { method: 'POST', headers: { Cookie: req.headers.cookie, Origin: hubOrigin, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }) }); assert.equal(response.status, 200); await response.body?.cancel(); },
+  });
   const practicePort = await listen(practice.server), practiceOrigin = 'http://127.0.0.1:' + practicePort;
   const bridge = createPracticeAdminBridge({ library: practice.cloudLibrary, reviews: practice.reviewPackages, authenticate: identity, hubPort, onAdminError: error => console.error('Synthetic bridge error:', error) });
   const bridgePort = await listen(bridge.server); client = createAdminClient({ port: bridgePort });
@@ -115,6 +117,13 @@ test('one public-package review registers extension hashes, private imports reus
   assert.equal(item.source.kind, 'admin-delivery');
   const targetAccount = f.practice.cloudAccounts.status(f.people.newcomer.id); assert.ok(targetAccount.usage.storageBytes > 0); assert.equal(f.practice.cloudAccounts.status(f.people.admin.id).usage.storageBytes, 0);
   const owner = await fetch(f.practiceOrigin + '/cloud/practice/' + item.id + '/', { headers: { Cookie: 'qfh_session=' + f.tokens.newcomer } }); assert.equal(owner.status, 200);
+  const question = '/api/cloud/practice/' + item.id + '/api/collections/bank/' + item.banks[0].id + '/questions/single-sample-text', cookie = 'qfh_session=' + f.tokens.newcomer;
+  const current = await (await fetch(f.practiceOrigin + question, { headers: { Cookie: cookie } })).json();
+  const selectedOptionId = JSON.parse(await fs.readFile(path.join(snapshot, 'basic-content/question-banks/基础题型/基础题型展示/bank.json'), 'utf8')).questions[0].data.correctOptionId;
+  const answer = await fetch(f.practiceOrigin + question + '/actions', { method: 'POST', headers: { Cookie: cookie, Origin: f.practiceOrigin, 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId: 'admin-activity-answer', revision: current.state.revision, contentVersion: current.stamp.contentVersion, action: 'draft', data: { answer: { selectedOptionId } } }) });
+  assert.equal(answer.status, 200, await answer.clone().text()); await answer.body?.cancel();
+  for (let i = 0; i < 20 && !f.hub.metrics.overview().today.practice; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(f.hub.metrics.overview().today.practice, 1, 'real question actions must relay practice activity to the Hub');
   const stranger = await fetch(f.practiceOrigin + '/cloud/practice/' + item.id + '/', { headers: { Cookie: 'qfh_session=' + f.tokens.user } }); assert.equal(stranger.status, 404);
   const audit = await (await f.request('/api/admin/audit')).json(); assert.ok(audit.items.some(x => x.action === 'private-delivery')); assert.ok(audit.items.some(x => x.action === 'pack-approved'));
   const revoked = await f.request('/api/admin/cloud/extensions/revoke', { digest: job.extensions[0].digest, reason: '合成撤销检查' }); assert.equal(revoked.status, 200);

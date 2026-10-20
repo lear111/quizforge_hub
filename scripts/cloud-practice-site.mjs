@@ -39,4 +39,8 @@ const adminBridge = process.env.ADMIN_ENABLED === '1' ? createPracticeAdminBridg
 adminBridge?.listen(Number(process.env.PRACTICE_ADMIN_PORT || 4324), '127.0.0.1');
 server.requestTimeout = 135000;
 server.listen(4323, '127.0.0.1', () => console.log('QuizForge ordinary-user practice site ready on loopback port 4323'));
-for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { adminBridge?.close(); server.close(() => process.exit(0)); });
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
+  const stopPublic = () => server.close(() => process.exit(0));
+  // Finish an in-flight private delivery before the public server closes its DB.
+  if (adminBridge) adminBridge.close(stopPublic); else stopPublic();
+});

@@ -336,7 +336,7 @@ export async function createApp(options = {}) {
           res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
         }
         // Reading, saving and grading are normal use, never file downloads.
-        if (practiceApi && ['POST', 'PUT'].includes(req.method) && result.status < 400 && /\/(?:answer|answers|submit|exam|exams)(?:\/|$)/.test(practiceApi[2])) options.reportActivity?.(req, 'practice')?.catch(() => {});
+        if (practiceApi && ['POST', 'PUT'].includes(req.method) && result.status < 400 && /\/(?:answer|answers|submit|exam|exams|actions)(?:\/|$)/.test(practiceApi[2])) options.reportActivity?.(req, 'practice')?.catch(() => {});
         res.writeHead(result.status, { 'Content-Type': result.type, 'Content-Length': result.bytes.length, 'Cache-Control': 'no-store' }); res.end(result.bytes); return;
       }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
