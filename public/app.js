@@ -1,7 +1,7 @@
 import { enhanceLocalImport } from './local-import.js';
 let localImport = null;
 const $ = selector => document.querySelector(selector);
-let cloudEnabled = false;
+let cloudEnabled = false, practiceOrigin = '', invitationRequired = false;
 const app = $('#app');
 const icons = { plus: '<path d="M12 5v14M5 12h14"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>', grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>', book: '<path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1v15"/>', award: '<circle cx="12" cy="9" r="6"/><path d="m8 14-2 7 6-3 6 3-2-7"/>', code: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6m-3-14-2 16"/>', globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>', folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>', download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>', chat: '<path d="M21 11a9 9 0 0 1-9 9H3l2-5a9 9 0 1 1 16-4z"/>', upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>', image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="2"/><path d="m21 16-5-5-8 10"/>', check: '<path d="m5 12 4 4L19 6"/>', arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>', edit: '<path d="m16 3 5 5-12 12-6 1 1-6L16 3zM14 5l5 5"/>' };
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.book}</svg>`;
@@ -35,7 +35,7 @@ function updateCodeButton() {
   const email = $('#auth-email').value.trim().toLowerCase();
   const remaining = Math.max(0, Math.ceil(((codeCooldowns.get(email) || 0) - Date.now()) / 1000));
   button.textContent = remaining ? `${remaining} 秒后重发` : '获取验证码';
-  button.disabled = !registrationReady || !captchaToken || remaining > 0 || button.dataset.sending === '1';
+  button.disabled = !registrationReady || !captchaToken || (invitationRequired && !$('#auth-invitation')?.value.trim()) || remaining > 0 || button.dataset.sending === '1';
 }
 async function mountCaptcha() {
   const container = $('#register-captcha'); if (!container || !registrationReady) return;
@@ -57,7 +57,7 @@ async function sendEmailCode() {
   const widget = captchaWidget;
   button.dataset.sending = '1'; updateCodeButton(); form.querySelector('.form-error').textContent = '';
   try {
-    const result = await api('/api/auth/email-code', jsonOptions({ email, captchaToken }));
+    const result = await api('/api/auth/email-code', jsonOptions({ email, captchaToken, invitationCode: $('#auth-invitation')?.value.trim() }));
     codeCooldowns.set(email, Date.now() + result.retryAfter * 1000); toast(result.message);
   } catch (error) { if (form.isConnected) form.querySelector('.form-error').textContent = error.message; }
   finally {
@@ -77,17 +77,23 @@ const jsonOptions = (body, method = 'POST') => ({ method, headers: { 'Content-Ty
 function toast(message) { const node = $('#toast'); node.textContent = message; node.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 4500); }
 function account() {
   $('#account').innerHTML = `${user ? `<div class="user-chip"><a href="#mine" class="avatar" title="我的分享">${esc(Array.from(user.name)[0])}</a><a href="#mine" class="name">${esc(user.name)}</a><button class="text-button" data-action="logout">退出</button></div>${user.admin ? '<a class="text-button" href="#reviews">审核管理</a>' : ''}` : '<button class="text-button" data-action="login">登录 / 注册</button>'}<a href="#upload" class="button">${icon('plus')}<span>分享题库</span></a>`;
-  if (cloudEnabled) {
+  if (cloudEnabled && !practiceOrigin) {
     document.title = 'QuizForge Hub · 题库广场'; const subtitle = document.querySelector('.brand small'); if (subtitle) subtitle.textContent = 'Hub';
     const link = document.createElement('a'); link.className = 'text-button'; link.href = '/cloud/'; link.textContent = '云端空间'; $('#account').prepend(link);
   }
+  if (practiceOrigin) {
+    const link = document.createElement('a'); link.className = 'button secondary practice-entry'; link.href = practiceOrigin + '/'; link.textContent = '进入练习'; $('#account').prepend(link);
+  }
 }
 function cloudDownloadButton() {
-  if (!cloudEnabled) return;
+  if (!cloudEnabled && !practiceOrigin) return;
   const download = document.querySelector('[data-action="download"]');
-  if (!download || document.querySelector('[data-action="download-cloud"]')) return;
-  download.innerHTML = icon('download') + '下载到本地（.qbank）';
-  download.insertAdjacentHTML('beforebegin', '<button class="button" data-action="download-cloud">下载到云端</button><p class="cloud-download-status" role="status"></p>');
+  if (!download || currentPack?.status !== 'approved' || !/\.qbank$/i.test(currentPack.archive?.name ?? '') || document.querySelector('[data-action="download-cloud"]')) return;
+  if (practiceOrigin) {
+    const link = document.createElement('a'); link.className = 'button secondary'; link.dataset.action = 'download-cloud'; link.textContent = '下载到云端';
+    link.href = `${practiceOrigin}/cloud/import?pack=${encodeURIComponent(currentPack.id)}&revision=${currentPack.revision}`;
+    download.after(link);
+  } else download.insertAdjacentHTML('afterend', '<button class="button secondary" data-action="download-cloud">下载到云端</button><p class="cloud-download-status" role="status"></p>');
 }
 function empty(title, description, action = '<a class="button small" href="#upload">分享第一个题库 ' + icon('arrow') + '</a>') { return `<div class="empty"><div class="empty-symbol">${icon('book')}</div><h3>${title}</h3><p>${description}</p>${action}</div>`; }
 const statusNames = { pending: '待审核', approved: '已通过', rejected: '已驳回' };
@@ -134,6 +140,10 @@ function showAuth(mode = 'login', target = null) {
   if (!$('#auth-dialog').open) $('#auth-dialog').showModal();
   if (mode === 'register') {
     const passwordField = $('#auth-password').closest('.field');
+    if (invitationRequired) {
+      passwordField.insertAdjacentHTML('beforebegin', '<div class="field"><label for="auth-invitation">邀请码</label><input id="auth-invitation" name="invitationCode" required maxlength="38" autocomplete="off" spellcheck="false" placeholder="请输入管理员提供的邀请码"><p class="field-help">当前采用邀请注册，每个邀请码仅供一个账号使用。</p></div>');
+      $('#auth-invitation').addEventListener('input', updateCodeButton);
+    }
     passwordField.insertAdjacentHTML('beforebegin', `<div class="field"><label for="auth-code">邮箱验证码</label><div class="email-code-row"><input id="auth-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required placeholder="6 位验证码"><button type="button" id="send-email-code" data-action="send-email-code" class="button secondary small" disabled>获取验证码</button></div></div>${registrationReady ? '<div id="register-captcha" class="register-captcha" aria-label="人机验证"></div>' : '<p class="auth-note" role="status">注册暂未开放，请稍后再来。已有账号仍可登录。</p>'}`);
     $('#auth-form button[type="submit"]').disabled = !registrationReady;
     $('#auth-email').addEventListener('input', updateCodeButton);
@@ -183,6 +193,7 @@ document.addEventListener('click', async event => {
     if (action === 'reset-search') { filters = { q: '', sort: 'latest', page: 1 }; await render(); return; }
     if (action === 'retry') { await render(); return; }
     if (action === 'download-cloud' || action === 'download-cloud-copy') {
+      if (practiceOrigin) return;
       if (!user) { showAuth('login', location.hash); return; }
       const status = document.querySelector('.cloud-download-status'); element.disabled = true;
       if (status) status.textContent = '正在校验与导入到云端…';
@@ -250,6 +261,6 @@ document.addEventListener('submit', async event => {
 window.addEventListener('hashchange', () => { document.querySelectorAll('dialog[open]').forEach(d => d.close()); window.scrollTo(0, 0); render(); });
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', event => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } });
 $('#auth-dialog').addEventListener('close', clearCaptcha);
-try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; cloudEnabled = config.cloudEnabled; } catch (error) { toast(error.message); }
+try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; cloudEnabled = config.cloudEnabled; practiceOrigin = config.practiceOrigin || ''; invitationRequired = !!config.invitationRequired; } catch (error) { toast(error.message); }
 account(); await render(); cloudDownloadButton();
 new MutationObserver(cloudDownloadButton).observe(app, { childList: true, subtree: true });

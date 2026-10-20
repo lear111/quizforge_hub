@@ -68,6 +68,15 @@ test('Hub login handoff binds browser state, uses one-time short-lived codes, ch
   const revoked = await begin(); const revGranted = await request(revoked.route, 'hub.example', { Cookie: 'qfh_session=' + hubToken }); const revUrl = new URL(revGranted.headers.get('location'));
   const revComplete = await request(revUrl.pathname + revUrl.search, 'practice.example', { Cookie: revoked.verifier }); const revCookie = revComplete.headers.getSetCookie()[0].split(';')[0];
   active = false; assert.equal(await (await request('/me', 'practice.example', { Cookie: revCookie })).json(), null);
+  active = true;
+  const destination = '/cloud/import?pack=11111111-1111-4111-8111-111111111111&revision=3';
+  const imported = await request('/auth/hub?return=' + encodeURIComponent(destination)); assert.equal(imported.status, 303);
+  const importVerifier = imported.headers.getSetCookie()[0].split(';')[0], importAuthorize = new URL(imported.headers.get('location'));
+  const importIssued = await request(importAuthorize.pathname + importAuthorize.search, 'hub.example', { Cookie: 'qfh_session=' + hubToken });
+  const importCallback = new URL(importIssued.headers.get('location'));
+  const importComplete = await request(importCallback.pathname + importCallback.search, 'practice.example', { Cookie: importVerifier });
+  assert.equal(importComplete.headers.get('location'), destination);
+  assert.equal((await request('/auth/hub?return=https://evil.example')).status, 400);
   assert.equal((await request('/auth/hub', 'evil.example')).status, 403);
 });
 

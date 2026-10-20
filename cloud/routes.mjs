@@ -22,8 +22,13 @@ export function cloudRoute({ accounts, library, requireUser, requireAdmin, bodyJ
     if (pathname === '/api/cloud/library/from-hub' && req.method === 'POST') {
       throttle(req, 'cloud-import', 6, user.id); const input = await bodyJson(req);
       if (Object.keys(input).some(key => !['packId', 'revision', 'newCopy'].includes(key)) || input.newCopy !== undefined && typeof input.newCopy !== 'boolean') throw new CloudError(400, '公共题库导入参数无效');
-      const pack = resolveCloudPack(input.packId, input.revision);
-      json(res, 201, { item: await requireLibrary().installFile(user.id, user.id, pack.file, pack.filename, { ...pack.source, newCopy: !!input.newCopy }) }); return true;
+      const lib = requireLibrary();
+      const existing = lib.list(user.id).find(item => item.source.kind === 'hub' && item.source.packId === input.packId && item.source.revision === input.revision);
+      if (existing && !input.newCopy) { json(res, 200, { item: existing, alreadyInstalled: true }); return true; }
+      const pack = await resolveCloudPack(input.packId, input.revision);
+      try { json(res, 201, { item: await lib.installFile(user.id, user.id, pack.file, pack.filename, { ...pack.source, newCopy: !!input.newCopy }) }); }
+      finally { await pack.close?.(); }
+      return true;
     }
     const delivery = /^\/api\/cloud\/admin\/users\/([a-f0-9-]{36})\/import$/.exec(pathname);
     if ((pathname === '/api/cloud/library/import' || delivery) && req.method === 'POST') {

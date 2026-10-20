@@ -1,5 +1,6 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { CloudError } from './accounts.mjs';
+import { importReturnPath } from './hub-source.mjs';
 
 const fresh = () => randomBytes(32).toString('hex');
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -67,7 +68,8 @@ export class HubLogin {
       const address = String(req.headers['x-real-ip'] || req.socket.remoteAddress), budget = this.starts.get(address) || { count: 0, expires: this.now() + 60000 };
       if (++budget.count > 30 || this.pending.size >= 10000 || this.sessions.size >= 10000) throw new CloudError(429, '登录请求过于频繁，请稍后重试');
       this.starts.set(address, budget);
-      const request = fresh(), verifier = fresh(); this.pending.set(request, { verifier: hash(verifier), expires: this.now() + 600000 });
+      const target = url.searchParams.has('return') ? importReturnPath(url.searchParams.get('return')) : '/';
+      const request = fresh(), verifier = fresh(); this.pending.set(request, { verifier: hash(verifier), target, expires: this.now() + 600000 });
       res.setHeader('Set-Cookie', this.setCookie('__Host-qfh_practice_login', verifier, 600));
       return redirect(`${this.hub.origin}/practice-auth/authorize?request=${request}`);
     }
@@ -81,7 +83,7 @@ export class HubLogin {
       if (!user || user.id !== issued.userId) throw new CloudError(401, 'Hub 登录已失效，请重新登录');
       const token = fresh(); this.sessions.set(hash(token), { hubToken: issued.hubToken, userId: user.id, expires: this.now() + 12 * 3600000 });
       res.setHeader('Set-Cookie', [this.setCookie('__Host-qfh_practice', token, 12 * 3600), this.setCookie('__Host-qfh_practice_login', '', 0)]);
-      return redirect('/');
+      return redirect(pending.target || '/');
     }
     if (url.pathname === '/auth/logout') {
       if (req.method !== 'POST' || req.headers.origin !== this.practice.origin) throw new CloudError(403, '请求来源无效');

@@ -10,6 +10,8 @@
 
 #auth-dialog .email-code-row input{width:0;flex:1 1 0}#auth-dialog .email-code-row button{width:auto;flex:0 0 auto;padding:10px 12px;min-width:110px}
 
+.download-panel>.button{margin-top:9px}.download-panel>.file-facts+.button{margin-top:0}.header-actions .practice-entry{white-space:nowrap}
+@media(max-width:900px){.header{gap:20px}.header nav{gap:15px}.header-actions{gap:10px}.header-actions .practice-entry{padding:9px 12px}}
 /* QuizForge app identity: light surfaces and restrained purple accents. */
 .header{background:var(--white)}
 .brand{font-size:19px;font-weight:700;letter-spacing:-.4px}

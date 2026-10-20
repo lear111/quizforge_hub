@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { mailSettings, createMailProvider } from './mail.mjs';
 import { createEmailCodes, EmailCodeError } from './email-codes.mjs';
+import { createInvitations, InvitationError } from './invitations.mjs';
 import { createReviewNotifications } from './review-notifications.mjs';
 import { createLocalImport } from './local-import.mjs';
 import { CloudAccounts, CloudError } from './cloud/accounts.mjs';
@@ -70,6 +71,10 @@ export async function createApp(options = {}) {
   const provider = options.mailProvider || createMailProvider(mailSettings());
   const reviewNotifier = createReviewNotifications(db, options.reviewNotificationProvider || provider, reviewEmail, options.now);
   const emailCodes = createEmailCodes(db, provider, options.now);
+  const invitations = createInvitations(db, options.now);
+  const invitationRequired = options.invitationRequired ?? process.env.INVITATION_REQUIRED === '1';
+  const practiceOrigin = options.practiceOrigin ?? process.env.PRACTICE_ORIGIN ?? '';
+  if (practiceOrigin && (new URL(practiceOrigin).origin !== practiceOrigin || new URL(practiceOrigin).protocol !== 'https:')) throw new Error('Invalid practice origin');
   const secureCookies = options.secureCookies ?? process.env.COOKIE_SECURE === '1';
   const cookieName = options.cookieName ?? 'qfh_session';
   if (!/^[a-z][a-z0-9_]{0,40}$/.test(cookieName)) throw new Error('Invalid session cookie name');
@@ -259,7 +264,7 @@ export async function createApp(options = {}) {
     if (!file.name.toLowerCase().endsWith('.qbank')) fail(422, '此附件不是 .qbank 文件，暂不能下载到云端');
     return { file: path.join(uploadDir, file.id), filename: file.name, source: { kind: 'hub', packId, revision, sha256: file.sha256, title: row.title } };
   };
-  const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack, reserveTraffic });
+  const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack: options.resolveCloudPack || resolveCloudPack, reserveTraffic });
   const handleLocalImport = createLocalImport({ db, uploadDir, enabled: localImportEnabled, throttle, reserveTraffic, json, openFile: options.localImportOpenFile });
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -313,12 +318,13 @@ export async function createApp(options = {}) {
         res.writeHead(result.status, { 'Content-Type': result.type, 'Content-Length': result.bytes.length, 'Cache-Control': 'no-store' }); res.end(result.bytes); return;
       }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
-      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, turnstileSiteKey: emailCodes.siteKey, cloudEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' } }); return; }
+      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, invitationRequired, turnstileSiteKey: emailCodes.siteKey, cloudEnabled, practiceOrigin, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' } }); return; }
       if (await handleLocalImport(req, res, url)) return;
       if (await handleCloud(req, res, url)) return;
       if (pathname === '/api/auth/email-code' && req.method === 'POST') {
         throttle(req, 'email-code', 6);
         const input = await bodyJson(req);
+        if (invitationRequired) invitations.check(input.invitationCode);
         const email = text(input.email, '邮箱', 180).toLowerCase();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, '邮箱格式不正确');
         const ip = process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
@@ -336,11 +342,15 @@ export async function createApp(options = {}) {
         if (password.length < 10) fail(400, '密码至少需要 10 个字符');
         if (pathname.endsWith('register')) {
           if (!emailCodes.ready) fail(503, '注册邮件暂未开放，请稍后再来');
+          if (invitationRequired) invitations.check(input.invitationCode);
           const name = text(input.name, '昵称', 30);
           const salt = randomBytes(16).toString('hex');
           const digest = (await derive(password, salt, 64)).toString('hex');
           const id = randomUUID();
-          try { emailCodes.consume(email, input.code, () => db.prepare('INSERT INTO users (id,email,name,password,created) VALUES (?,?,?,?,?)').run(id, email, name, `${salt}:${digest}`, iso())); }
+          try { emailCodes.consume(email, input.code, () => {
+            db.prepare('INSERT INTO users (id,email,name,password,created) VALUES (?,?,?,?,?)').run(id, email, name, `${salt}:${digest}`, iso());
+            if (invitationRequired) invitations.consume(input.invitationCode, id);
+          }); }
           catch (e) { if (e.message.includes('UNIQUE')) fail(409, '该邮箱已注册'); throw e; }
           session(res, id); json(res, 201, { user: { id, email, name, admin: 0 } }); return;
         }
@@ -459,6 +469,9 @@ export async function createApp(options = {}) {
       if (['GET', 'HEAD'].includes(req.method) && !pathname.startsWith('/api/')) {
         const assets = { '/app.js': ['app.js', 'text/javascript'], '/local-import.js': ['local-import.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/notice.css': ['notice.css', 'text/css'], '/notice.js': ['notice.js', 'text/javascript'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
         if (cloudEnabled) {
+          assets['/cloud/import'] = ['cloud/import.html', 'text/html'];
+          assets['/cloud/import.js'] = ['cloud/import.js', 'text/javascript'];
+          assets['/cloud/import.css'] = ['cloud/import.css', 'text/css'];
           for (const name of ['app.js', 'vault.js', 'ai-client.js', 'cloud.css', 'practice.css', 'experience.js', 'experience.css', 'embedded.css']) assets['/cloud/' + name] = ['cloud/' + name, name.endsWith('.css') ? 'text/css' : 'text/javascript'];
           for (const route of ['/cloud/', '/cloud/ai', '/cloud/admin']) assets[route] = ['cloud/index.html', 'text/html'];
         }
@@ -480,7 +493,7 @@ export async function createApp(options = {}) {
       fail(404, '页面不存在');
     } catch (e) {
       if (res.headersSent) { res.destroy(); return; }
-      const status = e instanceof ApiError || e instanceof EmailCodeError || e instanceof CloudError ? e.status : e.code === 'ENOENT' ? 404 : 500;
+      const status = e instanceof ApiError || e instanceof EmailCodeError || e instanceof InvitationError || e instanceof CloudError ? e.status : e.code === 'ENOENT' ? 404 : 500;
       if (status === 500) console.error('Request failed:', e.name, e.code || 'internal');
       json(res, status, { error: status === 500 ? '服务器暂时无法处理，请稍后重试' : status === 404 && !(e instanceof ApiError) ? '文件不存在' : e.message });
     }
