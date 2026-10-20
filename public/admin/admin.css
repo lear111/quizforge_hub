@@ -82,3 +82,8 @@ html{color-scheme:light dark}body{margin:0;background:light-dark(#faf9fe,#18151f
     @media(pointer:coarse){#qf-admin button{min-height:44px}#qf-admin input,#qf-admin select,#qf-admin textarea{font-size:16px}}
 
 #qf-admin{border:0;border-radius:0}.qa-error{color:var(--qfa-red)}#qf-admin .qa-logo{object-fit:contain;background:none}#qf-admin .qa-main{max-width:1350px;width:100%}#qf-admin .qa-header{padding-right:24px}#qf-admin .qa-toast{position:sticky;bottom:0}#qf-admin .qa-code{max-height:560px;overflow:auto}#qf-admin .qa-file-select{margin:12px 0}#qf-admin .qa-screens{display:flex;gap:10px;flex-wrap:wrap}#qf-admin .qa-screens img{max-width:200px;max-height:150px;object-fit:contain}#qf-admin .qa-audit-detail{white-space:pre-wrap;max-width:600px;overflow-wrap:anywhere}#qf-admin .qa-ops{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}#qf-admin .qa-header a{color:var(--qfa-purple);font-size:13px}#qf-admin .qa-preview-question{padding:12px 0;border-bottom:1px solid var(--qfa-line)}
+
+#qf-admin{display:flex;flex-direction:column;min-height:100vh;min-height:100dvh}
+#qf-admin>.qa-header,#qf-admin>.qa-toast{flex-shrink:0}
+#qf-admin>.qa-layout{flex:1 0 auto}
+@media(max-width:760px){#qf-admin>.qa-layout{grid-template-rows:auto 1fr}}
