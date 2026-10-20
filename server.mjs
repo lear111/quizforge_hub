@@ -11,6 +11,7 @@ import os from 'node:os';
 import { mailSettings, createMailProvider } from './mail.mjs';
 import { createEmailCodes, EmailCodeError } from './email-codes.mjs';
 import { createReviewNotifications } from './review-notifications.mjs';
+import { createLocalImport } from './local-import.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
@@ -70,6 +71,7 @@ export async function createApp(options = {}) {
   const publicOrigin = options.publicOrigin ?? process.env.PUBLIC_ORIGIN;
   const archiveLimit = Number(process.env.MAX_ARCHIVE_MB || 20) * MB;
   const monthlyBudget = Number(options.monthlyBudgetBytes ?? Number(process.env.MONTHLY_FILE_BUDGET_GB || 150) * 1e9);
+  const localImportEnabled = options.localImportEnabled ?? process.env.LOCAL_IMPORT_ENABLED === '1';
   db.exec('CREATE TABLE IF NOT EXISTS traffic (period TEXT PRIMARY KEY, bytes INTEGER NOT NULL)');
   const month = () => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.BILLING_TIMEZONE || 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date());
   const reserveTraffic = (req, size, reserve = true) => {
@@ -230,6 +232,7 @@ export async function createApp(options = {}) {
       uploading = false;
     }
   };
+  const handleLocalImport = createLocalImport({ db, uploadDir, enabled: localImportEnabled, throttle, reserveTraffic, json, openFile: options.localImportOpenFile });
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
@@ -243,7 +246,8 @@ export async function createApp(options = {}) {
         if (req.headers.origin !== allowed) fail(403, '请求来源不受信任');
       }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
-      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, turnstileSiteKey: emailCodes.siteKey }); return; }
+      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, turnstileSiteKey: emailCodes.siteKey, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' } }); return; }
+      if (await handleLocalImport(req, res, url)) return;
       if (pathname === '/api/auth/email-code' && req.method === 'POST') {
         throttle(req, 'email-code', 6);
         const input = await bodyJson(req);
@@ -385,7 +389,7 @@ export async function createApp(options = {}) {
         await pipeline(createReadStream(path.join(uploadDir, file.id)), res); return;
       }
       if (['GET', 'HEAD'].includes(req.method) && !pathname.startsWith('/api/')) {
-        const assets = { '/app.js': ['app.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/notice.css': ['notice.css', 'text/css'], '/notice.js': ['notice.js', 'text/javascript'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
+        const assets = { '/app.js': ['app.js', 'text/javascript'], '/local-import.js': ['local-import.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/notice.css': ['notice.css', 'text/css'], '/notice.js': ['notice.js', 'text/javascript'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
         const entry = assets[pathname] || (pathname === '/' ? [downloadNotice ? 'notice.html' : 'index.html', 'text/html'] : pathname === '/manage/' ? ['index.html', 'text/html'] : null);
         if (entry) {
           let data = await readFile(path.join(root, 'public', entry[0]));

@@ -1,3 +1,5 @@
+import { enhanceLocalImport } from './local-import.js';
+let localImport = null;
 const $ = selector => document.querySelector(selector);
 const app = $('#app');
 const icons = { plus: '<path d="M12 5v14M5 12h14"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>', grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>', book: '<path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1v15"/>', award: '<circle cx="12" cy="9" r="6"/><path d="m8 14-2 7 6-3 6 3-2-7"/>', code: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6m-3-14-2 16"/>', globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>', folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>', download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>', chat: '<path d="M21 11a9 9 0 0 1-9 9H3l2-5a9 9 0 1 1 16-4z"/>', upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>', image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="2"/><path d="m21 16-5-5-8 10"/>', check: '<path d="m5 12 4 4L19 6"/>', arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>', edit: '<path d="m16 3 5 5-12 12-6 1 1-6L16 3zM14 5l5 5"/>' };
@@ -139,7 +141,7 @@ async function render() {
   }
   app.innerHTML = '<div class="loading" role="status">正在加载…</div>';
   try {
-    if (view === 'pack' && /^[a-f0-9-]{36}$/.test(id)) await detail(id, stamp);
+    if (view === 'pack' && /^[a-f0-9-]{36}$/.test(id)) { await detail(id, stamp); enhanceLocalImport({ document, pack: currentPack, config: localImport }); }
     else if (view === 'edit' && /^[a-f0-9-]{36}$/.test(id)) { const result = await api('/api/packs/' + id); if (stamp !== turn) return; if (result.pack.user_id !== user.id) throw new Error('只能编辑自己发布的题库'); uploadForm(result.pack); }
     else if (view === 'upload') uploadForm(null);
     else if (view === 'reviews') await reviews(stamp);
@@ -169,11 +171,11 @@ document.addEventListener('click', async event => {
     if (action === 'reset-search') { filters = { q: '', sort: 'latest', page: 1 }; await render(); return; }
     if (action === 'retry') { await render(); return; }
     if (action === 'download') {
-      const pack = currentPack; element.disabled = true; element.textContent = '下载中…';
+      const pack = currentPack; const previousLabel = element.innerHTML; element.disabled = true; element.textContent = '下载中…';
       try {
         await api('/api/packs/' + pack.id + '/download-status');
         const link = document.createElement('a'); link.href = '/api/packs/' + pack.id + '/download'; link.download = pack.archive.name; document.body.append(link); link.click(); link.remove(); toast('已请求下载，请查看浏览器下载记录');
-      } finally { element.disabled = false; element.innerHTML = icon('download') + '下载压缩包'; }
+      } finally { element.disabled = false; element.innerHTML = previousLabel; }
       return;
     }
     if (action === 'approve-pack' || action === 'reject-pack') {
@@ -223,5 +225,5 @@ document.addEventListener('submit', async event => {
 window.addEventListener('hashchange', () => { document.querySelectorAll('dialog[open]').forEach(d => d.close()); window.scrollTo(0, 0); render(); });
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', event => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } });
 $('#auth-dialog').addEventListener('close', clearCaptcha);
-try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; } catch (error) { toast(error.message); }
+try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; } catch (error) { toast(error.message); }
 account(); await render();
