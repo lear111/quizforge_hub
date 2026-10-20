@@ -184,6 +184,9 @@ document.addEventListener('click', async event => {
     if (element.dataset.deleteComment) { message('删除这条评论？', `<p class="dialog-intro">删除后无法恢复。</p><button class="button" data-confirm-comment="${element.dataset.deleteComment}">确认删除</button>`); return; }
     if (element.dataset.confirmComment) { await api('/api/comments/' + element.dataset.confirmComment, { method: 'DELETE' }); $('#message-dialog').close(); toast('评论已删除'); await render(); return; }
     const action = element.dataset.action;
+    // Cross-origin cloud import is a real navigation link, including modified
+    // clicks. Leave it to the browser before canceling in-page button actions.
+    if (action === 'download-cloud' && practiceOrigin && element.matches('a[href]')) return;
     if (!action) return; event.preventDefault();
     if (action === 'close-dialog') { element.closest('dialog').close(); return; }
     if (action === 'login') { showAuth('login', location.hash); return; }
