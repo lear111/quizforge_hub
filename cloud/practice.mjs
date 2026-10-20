@@ -138,7 +138,9 @@ export class CloudPractice {
         for (const name of ['content-type', 'x-quizforge-practice-session', 'x-quizforge-question-stamp', 'x-quizforge-transient-resource', 'x-quizforge-cloud-ai']) if (request.headers[name]) headers[name] = request.headers[name];
         if (body) headers['Content-Length'] = body.length;
         const result = await new Promise((resolve, reject) => {
-          const outgoing = http.request({ hostname: '127.0.0.1', port, path: pathname, method: request.method, headers, timeout: 120000 }, incoming => {
+          // Checkpoint file work can outlive the core's idle connection timeout.
+          // Open a fresh loopback connection; never retry a possibly saved write.
+          const outgoing = http.request({ hostname: '127.0.0.1', port, path: pathname, method: request.method, headers, agent: false, timeout: 120000 }, incoming => {
             const chunks = []; let bytes = 0;
             incoming.on('data', chunk => { if ((bytes += chunk.length) > 32 * 1024 ** 2) outgoing.destroy(new Error('Practice response limit')); else chunks.push(chunk); });
             incoming.once('end', () => resolve({ status: incoming.statusCode, type: incoming.headers['content-type'], bytes: Buffer.concat(chunks) })); incoming.once('error', reject);

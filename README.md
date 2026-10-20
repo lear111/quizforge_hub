@@ -1,6 +1,8 @@
 # QuizForge 题库广场
 
-独立的题库下载与交流网站，不与 QuizForge 应用建立连接。上传者分享压缩包、简介和截图，访问者浏览、下载，登录后评论。2026-10-10 已部署到腾讯云首尔服务器：**https://quizforge.treenewbee.cloud/**。线上使用独立数据库，部署时没有迁移本机账号或测试数据。
+QuizForge 的题库广场和云端练习服务，共用 Hub 账号。公共题库支持下载文件、唤醒本地 QuizForge 导入，以及下载到云端练习。题库广场：**https://quizforge.treenewbee.cloud/**；云端练习：**https://practice.treenewbee.cloud/**。线上使用独立数据目录，部署不迁移本机账号或测试数据。
+
+正式管理后台入口为 `/admin/`，需设置 `ADMIN_ENABLED=1` 并使用已明确授予管理员权限的账号登录。功能、隔离预审流程、统计口径与双服务部署配置见 [管理后台](docs/ADMIN.md)。
 
 界面采用 QuizForge 原图标和浅紫配色，保留简洁的搜索、题库列表、上传和评论流程。源码仓库：https://github.com/lear111/quizforge_hub 。仓库不包含真实账号、数据库、附件或邮件密钥。
 

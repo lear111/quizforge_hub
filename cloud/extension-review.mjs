@@ -47,7 +47,8 @@ export class ExtensionReviews {
   }
   verify(directory) {
     const item = extensionDigest(directory), review = this.db.prepare('SELECT status FROM cloud_extension_reviews WHERE digest=?').get(item.digest);
-    if (review?.status !== 'approved') throw new CloudError(422, review?.status === 'revoked' ? '此拓展审核已撤销，云端暂不能使用' : `拓展 ${item.extensionId} 的完整文件摘要尚未获准在云端运行`);
+    const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'manifest.json'), 'utf8'));
+    if (review?.status !== 'approved') throw new CloudError(422, review?.status === 'revoked' ? `拓展“${String(manifest.name || item.extensionId).slice(0, 100)}”的审核已撤销，云端暂不能使用` : `拓展“${String(manifest.name || item.extensionId).slice(0, 100)}”的完整文件摘要尚未获准在云端运行，请提交拓展审核`);
     return item;
   }
   list() { return this.db.prepare('SELECT digest,extension_id AS extensionId,version,status,reviewer,reviewed,reason FROM cloud_extension_reviews ORDER BY reviewed DESC').all(); }

@@ -40,6 +40,9 @@ export class HubLogin {
     if (!user || user.id !== session.userId) { this.sessions.delete(hash(raw)); return null; }
     return user;
   }
+  token(req) {
+    this.sweep(); const raw = cookie(req, '__Host-qfh_practice'); return raw && this.sessions.get(hash(raw))?.hubToken || null;
+  }
   async handle(req, res, url) {
     this.sweep();
     const host = req.headers.host;

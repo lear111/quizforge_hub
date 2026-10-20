@@ -16,6 +16,10 @@ import { createLocalImport } from './local-import.mjs';
 import { CloudAccounts, CloudError } from './cloud/accounts.mjs';
 import { cloudRoute } from './cloud/routes.mjs';
 import { CloudLibrary } from './cloud/library.mjs';
+import { ActivityMetrics } from './admin/metrics.mjs';
+import { createHubAdmin } from './admin/hub.mjs';
+import { createAdminClient } from './admin/bridge.mjs';
+import { ReviewPackages } from './admin/review-packages.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
@@ -72,6 +76,8 @@ export async function createApp(options = {}) {
   const reviewNotifier = createReviewNotifications(db, options.reviewNotificationProvider || provider, reviewEmail, options.now);
   const emailCodes = createEmailCodes(db, provider, options.now);
   const invitations = createInvitations(db, options.now);
+  const metrics = new ActivityMetrics(db, options.now);
+  const adminEnabled = options.adminEnabled ?? process.env.ADMIN_ENABLED === '1';
   const invitationRequired = options.invitationRequired ?? process.env.INVITATION_REQUIRED === '1';
   const practiceOrigin = options.practiceOrigin ?? process.env.PRACTICE_ORIGIN ?? '';
   if (practiceOrigin && (new URL(practiceOrigin).origin !== practiceOrigin || new URL(practiceOrigin).protocol !== 'https:')) throw new Error('Invalid practice origin');
@@ -92,6 +98,7 @@ export async function createApp(options = {}) {
   }) : null;
   const runtimeDirectory = options.cloudRuntimeDir ?? process.env.CLOUD_RUNTIME_DIR;
   const cloudLibrary = cloudAccounts && runtimeDirectory ? await CloudLibrary.create(db, cloudAccounts, dataDir, runtimeDirectory) : null;
+  const reviewPackages = cloudLibrary ? new ReviewPackages(cloudLibrary) : null;
   db.exec('CREATE TABLE IF NOT EXISTS traffic (period TEXT PRIMARY KEY, bytes INTEGER NOT NULL)');
   const month = () => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.BILLING_TIMEZONE || 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date());
   const reserveTraffic = (req, size, reserve = true, anonymous = false) => {
@@ -109,6 +116,7 @@ export async function createApp(options = {}) {
       if (reserve) for (const key of [period, day]) db.prepare('INSERT INTO traffic VALUES (?,?) ON CONFLICT(period) DO UPDATE SET bytes=bytes+excluded.bytes').run(key, size);
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
+    if (reserve) metrics.transfer(size);
   };
   const limits = new Map();
   let uploading = false;
@@ -122,7 +130,7 @@ export async function createApp(options = {}) {
     if (options.identityProvider) return req.externalHubIdentity || null;
     const raw = sessionPattern.exec(req.headers.cookie || '')?.[1];
     if (!raw) return null;
-    return db.prepare('SELECT u.id,u.name,u.email,u.admin FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?').get(hash(raw), Date.now()) || null;
+    return db.prepare('SELECT u.id,u.name,u.email,u.admin FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id=u.id)').get(hash(raw), Date.now()) || null;
   };
   const requireUser = req => identity(req) || fail(401, '请先登录');
   const requireAdmin = req => { const user = requireUser(req); if (!user.admin) fail(403, '仅管理员可审核题库'); return user; };
@@ -264,8 +272,9 @@ export async function createApp(options = {}) {
     if (!file.name.toLowerCase().endsWith('.qbank')) fail(422, '此附件不是 .qbank 文件，暂不能下载到云端');
     return { file: path.join(uploadDir, file.id), filename: file.name, source: { kind: 'hub', packId, revision, sha256: file.sha256, title: row.title } };
   };
-  const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack: options.resolveCloudPack || resolveCloudPack, reserveTraffic });
+  const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack: options.resolveCloudPack || resolveCloudPack, reserveTraffic });
   const handleLocalImport = createLocalImport({ db, uploadDir, enabled: localImportEnabled, throttle, reserveTraffic, json, openFile: options.localImportOpenFile });
+  const handleAdmin = createHubAdmin({ db, invitations, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
@@ -287,9 +296,21 @@ export async function createApp(options = {}) {
       // AI configuration runs without the Hub's third-party registration script.
       // Only this document may directly connect to user-selected HTTPS models.
       if (cloudEnabled && pathname.startsWith('/cloud/')) res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; frame-src 'none'; style-src 'self'; img-src 'self'; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+      if (pathname.startsWith('/admin/')) res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; frame-src 'none'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
       if (!['GET', 'HEAD'].includes(req.method)) {
         const allowed = publicOrigin || `http://${req.headers.host}`;
         if (req.headers.origin !== allowed) fail(403, '请求来源不受信任');
+      }
+      if (pathname === '/internal/activity' && req.method === 'POST') {
+        if (req.headers.host !== `127.0.0.1:${server.address().port}` || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) fail(403, '仅允许服务内部访问');
+        const user = requireUser(req); const input = await bodyJson(req);
+        if (!['visit', 'practice', 'heartbeat'].includes(input.kind)) fail(400, '活动类型无效');
+        throttle(req, 'activity-service', 60, user.id); metrics.record(user.id, input.kind); json(res, 200, { ok: true }); return;
+      }
+      if (pathname === '/api/cloud/activity' && req.method === 'POST' && options.reportActivity) {
+        const user = requireUser(req); throttle(req, 'activity-relay', 40, user.id); const input = await bodyJson(req);
+        if (!['visit', 'practice', 'heartbeat'].includes(input.kind)) fail(400, '活动类型无效');
+        await options.reportActivity(req, input.kind); json(res, 200, { ok: true }); return;
       }
       if (options.practiceHome && ['/', '/cloud/'].includes(pathname) && req.method === 'GET') {
         const user = identity(req);
@@ -315,10 +336,12 @@ export async function createApp(options = {}) {
           res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
         }
         // Reading, saving and grading are normal use, never file downloads.
+        if (practiceApi && ['POST', 'PUT'].includes(req.method) && result.status < 400 && /\/(?:answer|answers|submit|exam|exams)(?:\/|$)/.test(practiceApi[2])) options.reportActivity?.(req, 'practice')?.catch(() => {});
         res.writeHead(result.status, { 'Content-Type': result.type, 'Content-Length': result.bytes.length, 'Cache-Control': 'no-store' }); res.end(result.bytes); return;
       }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
-      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, invitationRequired, turnstileSiteKey: emailCodes.siteKey, cloudEnabled, practiceOrigin, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' } }); return; }
+      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, invitationRequired, turnstileSiteKey: emailCodes.siteKey, cloudEnabled, practiceOrigin, adminEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' } }); return; }
+      if (await handleAdmin(req, res, url)) return;
       if (await handleLocalImport(req, res, url)) return;
       if (await handleCloud(req, res, url)) return;
       if (pathname === '/api/auth/email-code' && req.method === 'POST') {
@@ -357,7 +380,7 @@ export async function createApp(options = {}) {
         const user = db.prepare('SELECT * FROM users WHERE email=?').get(email);
         const [salt, digest] = (user?.password || `${'0'.repeat(32)}:${'0'.repeat(128)}`).split(':');
         const candidate = await derive(password, salt, 64);
-        if (!user || !timingSafeEqual(candidate, Buffer.from(digest, 'hex'))) fail(401, '邮箱或密码不正确');
+        if (!user || !timingSafeEqual(candidate, Buffer.from(digest, 'hex')) || db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(user.id)) fail(401, '邮箱或密码不正确，或账号已停用');
         session(res, user.id); json(res, 200, { user: { id: user.id, email: user.email, name: user.name, admin: user.admin } }); return;
       }
       if (pathname === '/api/auth/logout' && req.method === 'POST') {
@@ -384,6 +407,7 @@ export async function createApp(options = {}) {
         const [, id, action] = match; const row = packRow(id);
         if (action === 'review' && req.method === 'POST') {
           const admin = requireAdmin(req); const input = await bodyJson(req);
+          if (adminEnabled) fail(409, '请前往管理后台执行包含拓展的整包审核');
           if (!['approved', 'rejected'].includes(input.decision)) fail(400, '请选择通过或驳回');
           if (!Number.isSafeInteger(input.revision) || input.revision < 1) fail(400, '审核版本无效');
           const note = text(input.note ?? '', '审核说明', 1000, input.decision === 'rejected');
@@ -468,7 +492,14 @@ export async function createApp(options = {}) {
       }
       if (['GET', 'HEAD'].includes(req.method) && !pathname.startsWith('/api/')) {
         const assets = { '/app.js': ['app.js', 'text/javascript'], '/local-import.js': ['local-import.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/notice.css': ['notice.css', 'text/css'], '/notice.js': ['notice.js', 'text/javascript'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
+        assets['/activity.js'] = ['activity.js', 'text/javascript'];
+        if (adminEnabled) {
+          if (pathname === '/admin/') { if (!identity(req)) { res.writeHead(303, { Location: '/manage/#admin', 'Cache-Control': 'no-store' }).end(); return; } requireAdmin(req); }
+          assets['/admin/'] = ['admin/index.html', 'text/html']; assets['/admin/app.js'] = ['admin/app.js', 'text/javascript']; assets['/admin/admin.css'] = ['admin/admin.css', 'text/css'];
+        }
         if (cloudEnabled) {
+          assets['/cloud/activity.js'] = ['activity.js', 'text/javascript'];
+          assets['/cloud/library.js'] = ['cloud/library.js', 'text/javascript'];
           assets['/cloud/import'] = ['cloud/import.html', 'text/html'];
           assets['/cloud/import.js'] = ['cloud/import.js', 'text/javascript'];
           assets['/cloud/import.css'] = ['cloud/import.css', 'text/css'];
@@ -500,7 +531,7 @@ export async function createApp(options = {}) {
   });
   server.requestTimeout = 45000; server.headersTimeout = 10000;
   server.on('close', () => { clearInterval(sweep); reviewNotifier.stop(); cloudLibrary?.close(); db.close(); });
-  return { server, dataDir };
+  return { server, dataDir, db, cloudLibrary, cloudAccounts, metrics, reviewPackages };
 }
 
 if (import.meta.main) {

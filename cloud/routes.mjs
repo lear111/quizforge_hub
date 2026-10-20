@@ -1,8 +1,9 @@
 import { CloudError } from './accounts.mjs';
 import fs from 'node:fs';
 import { pipeline } from 'node:stream/promises';
+import { filename } from '../admin/common.mjs';
 
-export function cloudRoute({ accounts, library, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack, reserveTraffic }) {
+export function cloudRoute({ accounts, library, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack, reserveTraffic }) {
   return async (req, res, url) => {
     const pathname = url.pathname;
     if (!pathname.startsWith('/api/cloud/')) return false;
@@ -13,6 +14,11 @@ export function cloudRoute({ accounts, library, requireUser, requireAdmin, bodyJ
       json(res, 200, { ...accounts.status(user.id), stage: library ? 'cloud-practice' : 'resource-foundation', ai: { keyStorage: 'browser-only', directConnection: true, serverRelay: false }, trafficScope: 'qbank-downloads-and-exports', personalMonthlyTrafficLimit: false, libraryReady: !!library, practiceReady: !!library?.practice }); return true;
     }
     const requireLibrary = () => { if (!library) throw new CloudError(503, '云端题库导入尚未配置'); return library; };
+    if (pathname === '/api/cloud/extensions/submissions' && req.method === 'GET') { requireLibrary(); json(res, 200, { items: reviewPackages.list(user.id) }); return true; }
+    if (pathname === '/api/cloud/extensions/submissions' && req.method === 'POST') {
+      requireLibrary(); throttle(req, 'extension-submission', 3, user.id);
+      json(res, 201, { item: await reviewPackages.receive(user, req, filename(req), { kind: 'private' }) }); return true;
+    }
     if (pathname === '/api/cloud/library' && req.method === 'GET') { json(res, 200, { items: requireLibrary().list(user.id) }); return true; }
     if (pathname === '/api/cloud/library/demo' && req.method === 'POST') {
       throttle(req, 'cloud-import', 6, user.id); const input = await bodyJson(req);

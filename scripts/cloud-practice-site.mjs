@@ -3,13 +3,20 @@ import { createApp } from '../server.mjs';
 import { HubLogin } from '../cloud/hub-login.mjs';
 import { CloudError } from '../cloud/accounts.mjs';
 import { createHubSource, hubImportTarget } from '../cloud/hub-source.mjs';
+import { createPracticeAdminBridge } from '../admin/bridge.mjs';
 
 if (!process.env.DATA_DIR || path.basename(path.resolve(process.env.DATA_DIR)) !== 'quizforge-hub-practice') throw new Error('Dedicated practice data directory required');
 const practiceOrigin = 'https://practice.treenewbee.cloud', hubOrigin = 'https://quizforge.treenewbee.cloud';
 const login = new HubLogin({ practiceOrigin, hubOrigin });
-const { server } = await createApp({
+const reportActivity = async (req, kind) => {
+  const token = login.token(req); if (!token) return;
+  const response = await fetch('http://127.0.0.1:4318/internal/activity', { method: 'POST', headers: { Cookie: 'qfh_session=' + token, Origin: hubOrigin, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }), redirect: 'error', signal: AbortSignal.timeout(5000) });
+  await response.body?.cancel();
+};
+const app = await createApp({
   dataDir: process.env.DATA_DIR, cloudEnabled: true, cloudRuntimeDir: process.env.CLOUD_RUNTIME_DIR,
   resolveCloudPack: createHubSource({ origin: hubOrigin, dataDir: process.env.DATA_DIR }),
+  reportActivity,
   downloadNotice: false, secureCookies: true, publicOrigin: practiceOrigin, practiceHome: true,
   mailProvider: { ready: false }, beforeRequest: async (req, res, url) => {
     if (await login.handle(req, res, url)) return true;
@@ -27,6 +34,9 @@ const { server } = await createApp({
     return false;
   }, identityProvider: req => login.resolve(req),
 });
+const { server } = app;
+const adminBridge = process.env.ADMIN_ENABLED === '1' ? createPracticeAdminBridge({ library: app.cloudLibrary, reviews: app.reviewPackages, authenticate: token => login.identity(token) }).server : null;
+adminBridge?.listen(Number(process.env.PRACTICE_ADMIN_PORT || 4324), '127.0.0.1');
 server.requestTimeout = 135000;
 server.listen(4323, '127.0.0.1', () => console.log('QuizForge ordinary-user practice site ready on loopback port 4323'));
-for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => server.close(() => process.exit(0)));
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { adminBridge?.close(); server.close(() => process.exit(0)); });

@@ -1,7 +1,8 @@
 import { enhanceLocalImport } from './local-import.js';
+import { bindActivity } from './activity.js';
 let localImport = null;
 const $ = selector => document.querySelector(selector);
-let cloudEnabled = false, practiceOrigin = '', invitationRequired = false;
+let cloudEnabled = false, practiceOrigin = '', invitationRequired = false, adminEnabled = false;
 const app = $('#app');
 const icons = { plus: '<path d="M12 5v14M5 12h14"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>', grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>', book: '<path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1v15"/>', award: '<circle cx="12" cy="9" r="6"/><path d="m8 14-2 7 6-3 6 3-2-7"/>', code: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6m-3-14-2 16"/>', globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>', folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>', download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>', chat: '<path d="M21 11a9 9 0 0 1-9 9H3l2-5a9 9 0 1 1 16-4z"/>', upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>', image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="2"/><path d="m21 16-5-5-8 10"/>', check: '<path d="m5 12 4 4L19 6"/>', arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>', edit: '<path d="m16 3 5 5-12 12-6 1 1-6L16 3zM14 5l5 5"/>' };
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.book}</svg>`;
@@ -76,7 +77,8 @@ async function api(url, options = {}) {
 const jsonOptions = (body, method = 'POST') => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 function toast(message) { const node = $('#toast'); node.textContent = message; node.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 4500); }
 function account() {
-  $('#account').innerHTML = `${user ? `<div class="user-chip"><a href="#mine" class="avatar" title="我的分享">${esc(Array.from(user.name)[0])}</a><a href="#mine" class="name">${esc(user.name)}</a><button class="text-button" data-action="logout">退出</button></div>${user.admin ? '<a class="text-button" href="#reviews">审核管理</a>' : ''}` : '<button class="text-button" data-action="login">登录 / 注册</button>'}<a href="#upload" class="button">${icon('plus')}<span>分享题库</span></a>`;
+  bindActivity({ document, account: user?.id || null });
+  $('#account').innerHTML = `${user ? `<div class="user-chip"><a href="#mine" class="avatar" title="我的分享">${esc(Array.from(user.name)[0])}</a><a href="#mine" class="name">${esc(user.name)}</a><button class="text-button" data-action="logout">退出</button></div>${user.admin ? `<a class="text-button" href="${adminEnabled ? '/admin/' : '#reviews'}">管理后台</a>` : ''}` : '<button class="text-button" data-action="login">登录 / 注册</button>'}<a href="#upload" class="button">${icon('plus')}<span>分享题库</span></a>`;
   if (cloudEnabled && !practiceOrigin) {
     document.title = 'QuizForge Hub · 题库广场'; const subtitle = document.querySelector('.brand small'); if (subtitle) subtitle.textContent = 'Hub';
     const link = document.createElement('a'); link.className = 'text-button'; link.href = '/cloud/'; link.textContent = '云端空间'; $('#account').prepend(link);
@@ -152,9 +154,10 @@ function showAuth(mode = 'login', target = null) {
   $('#auth-form .auth-note:last-child').textContent = '邮箱仅用于登录和注册验证，不会展示在题库和评论中。暂不支持自助密码找回。';
 }
 function message(title, html) { $('#message-content').innerHTML = `<h2 id="message-title">${title}</h2>${html}`; $('#message-dialog').showModal(); }
-function guidelines() { message('分享须知', '<div class="guidelines"><p><strong>分享有权公开的内容。</strong><br>请注明资料来源，不上传未经授权的付费题库、教材扫描件或个人敏感信息。</p><p><strong>提交后等待审核。</strong><br>题库通过人工审核后才能公开下载；修改介绍、截图或文件后需重新审核。人工审核不等同于病毒扫描。</p><p><strong>让文件可用，让介绍清楚。</strong><br>请检查压缩包与截图，说明适用版本和导入方式。服务器不会自动解压文件，也不会验证题库内容。</p><p><strong>保持友善交流。</strong><br>评论用于提问和反馈，请勿发布广告、攻击性内容或个人信息。</p><p><strong>发现问题及时举报。</strong><br>题库详情页可提交举报。管理员可以下架题库、删除不当评论。</p><p>此页面是试用版分享说明，正式公开运营前需补充完整的服务协议、隐私政策和联系渠道。</p></div>'); }
+function guidelines() { message('分享须知', '<div class="guidelines"><p><strong>分享有权公开的内容。</strong><br>请注明资料来源，不上传未经授权的付费题库、教材扫描件或个人敏感信息。</p><p><strong>提交后等待审核。</strong><br>题库通过人工审核后才能公开下载；修改介绍、截图或文件后需重新审核。人工审核不等同于病毒扫描。</p><p><strong>让文件可用，让介绍清楚。</strong><br>请检查压缩包与截图，说明适用版本和导入方式。管理员会对格式 3 的 .qbank 静态解包核对内容与拓展，待审拓展不会自动运行。</p><p><strong>保持友善交流。</strong><br>评论用于提问和反馈，请勿发布广告、攻击性内容或个人信息。</p><p><strong>发现问题及时举报。</strong><br>题库详情页可提交举报。管理员可以下架题库、删除不当评论。</p><p>此页面是试用版分享说明，正式公开运营前需补充完整的服务协议、隐私政策和联系渠道。</p></div>'); }
 async function render() {
   const stamp = ++turn; const [view = 'library', id] = location.hash.slice(1).split('/');
+  if (view === 'admin') { if (user?.admin) { location.assign('/admin/'); return; } app.innerHTML = empty('管理员登录', '请使用管理员账号进入管理后台。', '<button class="button" data-action="login">登录</button>'); if (!user) showAuth('login', '#admin'); return; }
   document.title = 'QuizForge · 题库广场'; currentPack = null;
   previewUrls.forEach(URL.revokeObjectURL); previewUrls = [];
   document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === view));
@@ -264,6 +267,6 @@ document.addEventListener('submit', async event => {
 window.addEventListener('hashchange', () => { document.querySelectorAll('dialog[open]').forEach(d => d.close()); window.scrollTo(0, 0); render(); });
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', event => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } });
 $('#auth-dialog').addEventListener('close', clearCaptcha);
-try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; cloudEnabled = config.cloudEnabled; practiceOrigin = config.practiceOrigin || ''; invitationRequired = !!config.invitationRequired; } catch (error) { toast(error.message); }
+try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; cloudEnabled = config.cloudEnabled; practiceOrigin = config.practiceOrigin || ''; invitationRequired = !!config.invitationRequired; adminEnabled = !!config.adminEnabled; } catch (error) { toast(error.message); }
 account(); await render(); cloudDownloadButton();
 new MutationObserver(cloudDownloadButton).observe(app, { childList: true, subtree: true });

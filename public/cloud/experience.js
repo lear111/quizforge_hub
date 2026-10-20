@@ -1,4 +1,6 @@
 import { bindCloudAi } from './ai-client.js';
+import { bindActivity } from './activity.js';
+import { bindCloudLibrary } from './library.js';
 const size = bytes => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GiB` : `${(bytes / 1024 ** 2).toFixed(2)} MiB`;
 export async function downloadCloudSelection(route, selection) {
   const response = await fetch(route, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(selection), signal: AbortSignal.timeout(135000) });
@@ -6,6 +8,8 @@ export async function downloadCloudSelection(route, selection) {
   return response.blob();
 }
 export function bindCloudExperience({ document, beforeLogout }) {
+  bindActivity({ document, practice: true, endpoint: '/api/cloud/activity' });
+  bindCloudLibrary(document);
   const get = id => document.getElementById(id), dialog = get('network-settings-dialog');
   const user = get('user-settings-panel'), ai = get('ai-settings-panel'), appearance = get('appearance-settings-panel');
   const tabs = [...document.querySelectorAll('.settings-tabs [role="tab"]')];

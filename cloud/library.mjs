@@ -120,6 +120,7 @@ export class CloudLibrary {
       this.accounts.transaction(() => {
         this.accounts.commitStorage(userId, reservation, bytes, { transaction: false });
         this.db.prepare("UPDATE cloud_imports SET status='ready',reservation_id=NULL WHERE id=?").run(id);
+        if (source.kind === 'admin-delivery') this.accounts.audit(actorId, userId, 'private-delivery', {}, { importId: id, title: result.name, bytes }, '管理员向指定用户交付私人题库');
       });
       committed = true;
       return this.list(userId).find(item => item.id === id);
