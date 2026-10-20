@@ -3,8 +3,10 @@ export function bindCloudLibrary(document) {
   const dialog = document.createElement('dialog'); dialog.id = 'cloud-library-dialog'; dialog.className = 'library-manage-dialog'; dialog.setAttribute('aria-labelledby', 'cloud-library-title');
   dialog.innerHTML = '<div class="dialog-heading"><h2 id="cloud-library-title">我的云端题库</h2><button type="button" id="cloud-library-close" aria-label="关闭">×</button></div><div class="cloud-library-tabs"><button type="button" data-cloud-tab="list">切换题库</button><button type="button" data-cloud-tab="upload">从电脑导入</button></div><div id="cloud-library-content"></div>';
   document.body.append(dialog);
-  const picker = document.createElement('button'); picker.type = 'button'; picker.className = 'icon-button'; picker.id = 'cloud-library-open'; picker.textContent = '切换'; picker.title = '切换我的云端题库';
-  const upload = document.createElement('button'); upload.type = 'button'; upload.className = 'icon-button'; upload.id = 'cloud-library-import'; upload.textContent = '导入'; upload.title = '从电脑上传私人题库';
+  const picker = document.createElement('button'); picker.type = 'button'; picker.className = 'icon-button'; picker.id = 'cloud-library-open'; picker.title = '切换我的云端题库'; picker.setAttribute('aria-label', picker.title);
+  picker.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 4h4v16H4zM10 4h4v16h-4zM16 5l4-1 4 15-4 1z" transform="translate(-1 0)"/></svg>';
+  const upload = document.createElement('button'); upload.type = 'button'; upload.className = 'icon-button'; upload.id = 'cloud-library-import'; upload.title = '从电脑上传私人题库'; upload.setAttribute('aria-label', upload.title);
+  upload.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 16V3m-4 4 4-4 4 4M4 16v5h16v-5"/></svg>';
   actions.prepend(picker, upload);
   let busy = false, file = null, view = 0;
   const content = () => dialog.querySelector('#cloud-library-content');
