@@ -60,7 +60,7 @@ async function sendEmailCode() {
   try {
     const result = await api('/api/auth/email-code', jsonOptions({ email, captchaToken, invitationCode: $('#auth-invitation')?.value.trim() }));
     codeCooldowns.set(email, Date.now() + result.retryAfter * 1000); toast(result.message);
-  } catch (error) { if (form.isConnected) form.querySelector('.form-error').textContent = error.message; }
+  } catch (error) { if (form.isConnected) form.querySelector('.form-error').textContent = error.message; await refreshInvitationPolicy(form).catch(() => {}); }
   finally {
     button.dataset.sending = '0';
     if (widget === captchaWidget) { captchaToken = ''; if (widget !== null) window.turnstile.reset(widget); }
@@ -135,6 +135,18 @@ async function reports(stamp) {
   const result = await api('/api/reports'); if (stamp !== turn) return;
   app.innerHTML = `<div class="breadcrumb"><a href="#library">题库广场</a><span>/</span><span>管理</span></div><h1 class="page-title">举报与下载预算</h1><p class="page-subtitle">本期 ${esc(result.traffic.period)}，附件预留用量 ${size(result.traffic.reservedBytes)} / ${size(result.traffic.budgetBytes)}。计数包含中断请求，不等同于阿里云实际流量。</p>${result.reports.length ? result.reports.map(r => `<article class="report-card"><h3><a href="#pack/${r.pack_id}">${esc(r.title)} ↗</a></h3><p>${esc(r.reason)}</p><div class="subtle">${esc(r.author)} · ${new Date(r.created).toLocaleString('zh-CN')}</div></article>`).join('') : empty('目前没有举报', '用户提交的题库举报会出现在这里。', '')}`;
 }
+async function refreshInvitationPolicy(form) {
+  const config = await api('/api/config', { signal: AbortSignal.timeout(5000) });
+  if (form !== $('#auth-form') || form.dataset.mode !== 'register' || !$('#auth-dialog').open) return;
+  invitationRequired = config.invitationRequired === true;
+  let input = $('#auth-invitation');
+  if (invitationRequired && !input) {
+    $('#auth-code').closest('.field').insertAdjacentHTML('beforebegin', '<div class="field"><label for="auth-invitation">邀请码</label><input id="auth-invitation" name="invitationCode" required maxlength="38" autocomplete="off" spellcheck="false" placeholder="请输入管理员提供的邀请码"><p class="field-help">当前采用邀请注册，每个邀请码仅供一个账号使用。</p></div>');
+    input = $('#auth-invitation'); input.addEventListener('input', updateCodeButton);
+  }
+  if (input) { input.required = invitationRequired; input.disabled = !invitationRequired; input.closest('.field').hidden = !invitationRequired; }
+  updateCodeButton();
+}
 function showAuth(mode = 'login', target = null) {
   clearCaptcha();
   authTarget = target;
@@ -150,6 +162,8 @@ function showAuth(mode = 'login', target = null) {
     $('#auth-form button[type="submit"]').disabled = !registrationReady;
     $('#auth-email').addEventListener('input', updateCodeButton);
     mountCaptcha();
+    const form = $('#auth-form');
+    refreshInvitationPolicy(form).catch(() => {});
   }
   $('#auth-form .auth-note:last-child').textContent = '邮箱仅用于登录和注册验证，不会展示在题库和评论中。暂不支持自助密码找回。';
 }
@@ -261,7 +275,7 @@ document.addEventListener('submit', async event => {
       $('#message-dialog').close(); toast(form.dataset.decision === 'approved' ? '审核已通过，题库已公开' : '已驳回，作者可查看原因'); await render();
     } else if (form.id === 'comment-form') { await api('/api/packs/' + currentPack.id + '/comments', jsonOptions({ body: new FormData(form).get('body') })); toast('评论已发布'); await render(); }
     else if (form.id === 'report-form') { await api('/api/packs/' + currentPack.id + '/report', jsonOptions({ reason: new FormData(form).get('reason') })); $('#message-dialog').close(); toast('举报已提交'); }
-  } catch (error) { if (errorNode) errorNode.textContent = error.message; else toast(error.message); }
+  } catch (error) { if (errorNode) errorNode.textContent = error.message; else toast(error.message); if (form.id === 'auth-form' && form.dataset.mode === 'register') await refreshInvitationPolicy(form).catch(() => {}); }
   finally { button.disabled = form.id === 'auth-form' && form.dataset.mode === 'register' && !registrationReady; }
 });
 window.addEventListener('hashchange', () => { document.querySelectorAll('dialog[open]').forEach(d => d.close()); window.scrollTo(0, 0); render(); });

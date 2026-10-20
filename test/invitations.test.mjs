@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createApp } from '../server.mjs';
@@ -15,21 +15,53 @@ async function fixture(t) {
   const provider = { ready: true, pepper: 'synthetic-invitation-test-pepper'.repeat(3), verify: async () => true, send: async (email, code) => codes.set(email, code) };
   let server, origin;
   const start = async () => {
-    ({ server } = await createApp({ dataDir, mailProvider: provider, invitationRequired: true, practiceOrigin: 'https://practice.example' }));
+    ({ server } = await createApp({ dataDir, mailProvider: provider, invitationRequired: true, adminEnabled: true, practiceOrigin: 'https://practice.example' }));
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); origin = `http://127.0.0.1:${server.address().port}`;
   };
   const stop = () => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
   await start();
   const db = new DatabaseSync(path.join(dataDir, 'hub.sqlite')), admin = randomUUID(), ordinary = randomUUID();
   for (const [id, role] of [[admin, 1], [ordinary, 0]]) db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?)').run(id, id + '@example.test', '合成账号', 'not-login', role, new Date().toISOString());
+  const tokens = { admin: 'd'.repeat(64), ordinary: 'e'.repeat(64) };
+  for (const [role, id] of [['admin', admin], ['ordinary', ordinary]]) db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(createHash('sha256').update(tokens[role]).digest('hex'), id, Date.now() + 3600000);
   const invitations = createInvitations(db);
   t.after(async () => { await stop(); db.close(); await rm(dataDir, { recursive: true, force: true }); });
-  const request = (route, body) => fetch(origin + route, body === undefined ? {} : { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const request = (route, body, options = {}) => fetch(origin + route, { method: options.method || (body === undefined ? 'GET' : 'POST'), headers: { Origin: options.origin || origin, 'Content-Type': 'application/json', ...(options.actor ? { Cookie: 'qfh_session=' + tokens[options.actor] } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const account = email => ({ email, name: '测试', password: 'synthetic-password-only' });
   const challenge = (email, invitationCode) => request('/api/auth/email-code', { email, invitationCode, captchaToken: 'synthetic' });
   const register = (email, invitationCode, code = codes.get(email)) => request('/api/auth/register', { ...account(email), invitationCode, code });
-  return { dataDir, db, invitations, admin, ordinary, request, account, challenge, register, codes, restart: async () => { await stop(); await start(); } };
+  return { dataDir, db, invitations, admin, ordinary, request, account, challenge, register, codes, provider, restart: async () => { await stop(); await start(); } };
 }
+
+test('admin invitation switch persists, gates mail and registration immediately, retains codes and keeps CAPTCHA/email verification and login', async t => {
+  const f = await fixture(t), route = '/api/admin/invitations/settings', [{ id, code }] = f.invitations.create(f.admin);
+  const setting = (required, options = {}) => f.request(route, { invitationRequired: required }, { actor: 'admin', method: 'PUT', ...options });
+  const policy = async () => (await (await f.request('/api/config')).json()).invitationRequired;
+  assert.equal((await f.request(route, { invitationRequired: false }, { method: 'PUT' })).status, 401);
+  assert.equal((await setting(false, { actor: 'ordinary' })).status, 403);
+  assert.equal((await setting(false, { origin: 'https://evil.example' })).status, 403);
+  assert.equal((await setting('false')).status, 400); assert.equal(await policy(), true);
+  assert.equal((await setting(false)).status, 200); assert.equal(await policy(), false);
+  await f.restart(); assert.equal(await policy(), false, 'persisted choice must override the original enabled default');
+  assert.equal((await (await f.request('/api/admin/invitations', undefined, { actor: 'admin' })).json()).invitationRequired, false);
+  f.provider.verify = async () => false;
+  assert.equal((await f.challenge('open@example.test')).status, 400); assert.equal(f.codes.size, 0);
+  f.provider.verify = async () => true;
+  assert.equal((await f.challenge('open@example.test')).status, 200);
+  assert.equal((await f.register('open@example.test', undefined, 'invalid')).status, 400);
+  assert.equal((await f.register('open@example.test', code)).status, 201);
+  assert.equal(f.invitations.list(f.admin).find(row => row.id === id).state, 'available', 'open registration must not consume an optional invitation');
+  assert.equal((await f.challenge('pending@example.test')).status, 200);
+  assert.equal((await setting(true)).status, 200); assert.equal(await policy(), true);
+  assert.equal((await f.register('pending@example.test')).status, 400, 'an email code issued while open cannot bypass the enabled invitation gate');
+  assert.equal((await f.register('pending@example.test', code)).status, 201, 'rejected registration must retain the email code and the old unused invitation');
+  assert.equal((await f.request('/api/auth/login', f.account('open@example.test'))).status, 200);
+  await f.restart(); assert.equal(await policy(), true);
+  const changes = f.db.prepare("SELECT actor_id,detail FROM admin_audit WHERE action='invitation-policy-updated' ORDER BY created").all();
+  assert.deepEqual(changes.map(row => JSON.parse(row.detail).replacement), [false, true]); assert.ok(changes.every(row => row.actor_id === f.admin));
+  f.db.exec("CREATE TRIGGER fail_policy_audit BEFORE INSERT ON admin_audit WHEN NEW.action='invitation-policy-updated' BEGIN SELECT RAISE(ABORT,'synthetic audit failure'); END");
+  assert.equal((await setting(false)).status, 500); assert.equal(await policy(), true, 'failed auditing must roll back the policy change');
+});
 
 test('invitation gates mail and registration, failed verification preserves it; one redemption survives restart and login needs no invitation', async t => {
   const f = await fixture(t), email = 'alice@example.test', [{ code, id }] = f.invitations.create(f.admin);

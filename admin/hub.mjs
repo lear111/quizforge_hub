@@ -4,7 +4,7 @@ import path from 'node:path';
 import { CloudError } from '../cloud/accounts.mjs';
 import { bytes, filename, jsonBody, reason, send, uuid } from './common.mjs';
 
-export function createHubAdmin({ db, invitations, metrics, requireUser, requireAdmin, throttle, cloud, token, uploadDir, enabled }) {
+export function createHubAdmin({ db, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, cloud, token, uploadDir, enabled }) {
   db.exec(`CREATE TABLE IF NOT EXISTS pack_admin_reviews(pack_id TEXT NOT NULL,revision INTEGER NOT NULL,sha256 TEXT NOT NULL,submission TEXT NOT NULL,PRIMARY KEY(pack_id,revision,sha256));
     CREATE TABLE IF NOT EXISTS pack_cloud_approvals(pack_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,sha256 TEXT NOT NULL,digests TEXT NOT NULL,status TEXT NOT NULL,actor_id TEXT NOT NULL,created INTEGER NOT NULL);`);
   const audit = (actor, action, target, detail) => db.prepare('INSERT INTO admin_audit VALUES (?,?,?,?,?,?)').run(randomUUID(), actor, target, action, JSON.stringify(detail), Date.now());
@@ -40,7 +40,18 @@ export function createHubAdmin({ db, invitations, metrics, requireUser, requireA
       const local = metrics.overview(Number(url.searchParams.get('days'))), remote = await call(req, '/summary');
       value = { ...local, transfers: { requests: local.transfers.requests + remote.transfers.requests, bytes: local.transfers.bytes + remote.transfers.bytes }, cloud: remote };
     }
-    else if (route === '/invitations' && req.method === 'GET') value = { items: invitations.list(actor.id) };
+    else if (route === '/invitations' && req.method === 'GET') value = { items: invitations.list(actor.id), invitationRequired: invitationPolicy.required() };
+    else if (route === '/invitations/settings' && req.method === 'PUT') {
+      const input = await jsonBody(req);
+      if (Object.keys(input).length !== 1 || typeof input.invitationRequired !== 'boolean') throw new CloudError(400, '请明确选择是否启用邀请码验证');
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const previous = invitationPolicy.required(); invitationPolicy.setRequired(input.invitationRequired);
+        if (previous !== input.invitationRequired) audit(actor.id, 'invitation-policy-updated', 'registration', { previous, replacement: input.invitationRequired });
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+      value = { invitationRequired: invitationPolicy.required() };
+    }
     else if (route === '/invitations' && req.method === 'POST') { const input = await jsonBody(req); value = { items: invitations.create(actor.id, input.count ?? 1, input.days ?? 30) }; status = 201; }
     else if (/^\/invitations\/[a-f0-9-]{36}\/revoke$/.test(route) && req.method === 'POST') { invitations.revoke(actor.id, route.split('/')[2]); value = { ok: true }; }
     else if (route === '/users' && req.method === 'GET') value = await listUsers(req, url);

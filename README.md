@@ -67,6 +67,7 @@ Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 
 | `DATA_DIR` | 项目下 `data` | 数据库、附件目录；不可放在公开静态目录中 |
 | `PUBLIC_ORIGIN` | 请求的本机 HTTP origin | 生产必须设置完整 HTTPS origin，例如 `https://hub.example.com`，不带末尾斜杠 |
 | `COOKIE_SECURE` | `0` | 本地 HTTP 为 0，生产 HTTPS 必须为 1 |
+| `INVITATION_REQUIRED` | `0` | 首次初始化邀请码验证开关；后续在管理后台的邀请码页面保存，重启保留管理员选择 |
 | `TRUST_PROXY` | `0` | 生产只有在 Node 端口不对外开放、反向代理覆盖 `X-Real-IP` 时才设为 1 |
 | `LOCAL_IMPORT_ENABLED` | `0` | 设为 1 开启公共 `.qbank` 的本地唤醒入口及固定版本下载接口；须先提供支持协议 v1 的 Windows 安装版 |
 | `MAX_ARCHIVE_MB` | `20` | 单个压缩包上限，MiB；调整时同步修改反向代理请求体限制 |

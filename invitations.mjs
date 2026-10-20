@@ -8,6 +8,22 @@ const fingerprint = code => {
   return createHash('sha256').update(code.trim().toUpperCase()).digest('hex');
 };
 
+export function createInvitationPolicy(db, initiallyRequired = false) {
+  if (typeof initiallyRequired !== 'boolean') throw new Error('Invitation policy default must be boolean');
+  db.exec('CREATE TABLE IF NOT EXISTS registration_policy(id INTEGER PRIMARY KEY CHECK(id=1),required INTEGER NOT NULL CHECK(required IN (0,1)))');
+  // Environment configuration seeds existing installations once; subsequent
+  // administrator choices survive restarts and release changes.
+  db.prepare('INSERT OR IGNORE INTO registration_policy VALUES (1,?)').run(initiallyRequired ? 1 : 0);
+  return {
+    required: () => db.prepare('SELECT required FROM registration_policy WHERE id=1').get().required === 1,
+    setRequired(value) {
+      if (typeof value !== 'boolean') throw new InvitationError(400, '请明确选择是否启用邀请码验证');
+      if (!db.isTransaction) throw new Error('Invitation policy updates require the audit transaction');
+      db.prepare('UPDATE registration_policy SET required=? WHERE id=1').run(value ? 1 : 0);
+    },
+  };
+}
+
 export function createInvitations(db, now = Date.now) {
   db.exec(`CREATE TABLE IF NOT EXISTS invitations (
     id TEXT PRIMARY KEY, digest TEXT UNIQUE NOT NULL, prefix TEXT NOT NULL,
