@@ -12,6 +12,10 @@ const date = value => new Date(value).toLocaleDateString('zh-CN', { month: '2-di
 const avatar = name => `<span class="avatar">${esc(Array.from(name || '?')[0])}</span>`;
 const tagList = tags => `<div class="tags">${tags.map(v => `<span class="tag">${esc(v)}</span>`).join('')}</div>`;
 let user = null, maxArchiveMB = 20, turn = 0, toastTimer, authTarget = null;
+function practiceAuthorization(target) {
+  const request = /^#practice-login\/([a-f0-9]{64})$/.exec(target || '')?.[1];
+  return request ? '/practice-auth/authorize?request=' + request : null;
+}
 let filters = { q: '', sort: 'latest', page: 1 };
 let reviewFilter = 'pending';
 let currentPack = null, upload = null, previewUrls = [];
@@ -152,6 +156,7 @@ function showAuth(mode = 'login', target = null) {
   authTarget = target;
   $('#auth-content').innerHTML = `<h2 id="auth-title">${mode === 'register' ? '欢迎加入题库广场' : '欢迎回来'}</h2><p class="dialog-intro">登录后，分享你的题库，与同路人交流。</p><div class="auth-tabs"><button class="${mode === 'login' ? 'active' : ''}" data-auth-mode="login">登录</button><button class="${mode === 'register' ? 'active' : ''}" data-auth-mode="register">注册账号</button></div><form id="auth-form" data-mode="${mode}">${mode === 'register' ? '<div class="field"><label for="auth-name">昵称</label><input id="auth-name" name="name" required maxlength="30" autocomplete="nickname" placeholder="大家会看到这个名字"></div>' : ''}<div class="field"><label for="auth-email">邮箱</label><input id="auth-email" name="email" type="email" required maxlength="180" autocomplete="email" placeholder="you@example.com"></div><div class="field"><label for="auth-password">密码</label><input id="auth-password" name="password" type="password" required minlength="10" maxlength="128" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}" placeholder="至少 10 个字符"></div><p class="form-error" role="alert"></p><button type="submit" class="button">${mode === 'register' ? '注册并登录' : '登录'}</button><p class="auth-note">邮箱仅用于账号登录，不会展示在题库和评论中。当前版本暂不支持邮箱验证和自助密码找回。</p></form>`;
   if (!$('#auth-dialog').open) $('#auth-dialog').showModal();
+  if (practiceAuthorization(target)) $('#auth-content .dialog-intro').textContent = '与题库广场共用同一个账号，登录或注册后自动返回云端练习。';
   if (mode === 'register') {
     const passwordField = $('#auth-password').closest('.field');
     if (invitationRequired) {
@@ -171,6 +176,13 @@ function message(title, html) { $('#message-content').innerHTML = `<h2 id="messa
 function guidelines() { message('分享须知', '<div class="guidelines"><p><strong>分享有权公开的内容。</strong><br>请注明资料来源，不上传未经授权的付费题库、教材扫描件或个人敏感信息。</p><p><strong>提交后等待审核。</strong><br>题库通过人工审核后才能公开下载；修改介绍、截图或文件后需重新审核。人工审核不等同于病毒扫描。</p><p><strong>让文件可用，让介绍清楚。</strong><br>请检查压缩包与截图，说明适用版本和导入方式。管理员会对格式 3 的 .qbank 静态解包核对内容与拓展，待审拓展不会自动运行。</p><p><strong>保持友善交流。</strong><br>评论用于提问和反馈，请勿发布广告、攻击性内容或个人信息。</p><p><strong>发现问题及时举报。</strong><br>题库详情页可提交举报。管理员可以下架题库、删除不当评论。</p><p>此页面是试用版分享说明，正式公开运营前需补充完整的服务协议、隐私政策和联系渠道。</p></div>'); }
 async function render() {
   const stamp = ++turn; const [view = 'library', id] = location.hash.slice(1).split('/');
+  const authorization = practiceAuthorization(location.hash);
+  if (authorization) {
+    document.title = '登录 · QuizForge Hub';
+    if (user) { location.replace(authorization); return; }
+    app.innerHTML = empty('登录后开始练习', '练习页与题库广场共用同一个账号，完成登录或注册后将自动返回练习页。', '<button class="button" data-action="login">登录 / 注册</button>');
+    showAuth('login', location.hash); return;
+  }
   if (view === 'admin') { if (user?.admin) { location.assign('/admin/'); return; } app.innerHTML = empty('管理员登录', '请使用管理员账号进入管理后台。', '<button class="button" data-action="login">登录</button>'); if (!user) showAuth('login', '#admin'); return; }
   document.title = 'QuizForge · 题库广场'; currentPack = null;
   previewUrls.forEach(URL.revokeObjectURL); previewUrls = [];
@@ -264,6 +276,8 @@ document.addEventListener('submit', async event => {
     if (form.id === 'auth-form') {
       const data = Object.fromEntries(new FormData(form)); const result = await api('/api/auth/' + form.dataset.mode, jsonOptions(data));
       user = result.user; account(); $('#auth-dialog').close(); toast('登录成功');
+      const authorization = practiceAuthorization(authTarget);
+      if (authorization) { location.replace(authorization); return; }
       if (authTarget && location.hash !== authTarget) location.hash = authTarget; else await render();
     } else if (form.id === 'upload-form') {
       const data = new FormData(form); data.set('keepScreenshots', JSON.stringify(upload.keep));

@@ -53,13 +53,11 @@ export class HubLogin {
     const redirect = target => { req.resume(); res.writeHead(303, { Location: target, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }).end(); return true; };
     if (host === this.hub.host) {
       if (!['GET', 'HEAD'].includes(req.method)) throw new CloudError(405, '登录跳转仅支持 GET');
-      if (url.pathname === '/practice-auth/login.js') return send(200, loginScript, 'text/javascript; charset=utf-8');
-      if (url.pathname === '/practice-auth/login.css') return send(200, loginStyle, 'text/css; charset=utf-8');
       if (url.pathname !== '/practice-auth/authorize') throw new CloudError(404, '页面不存在');
       const request = url.searchParams.get('request'), pending = opaque(request) && this.pending.get(request);
       if (!pending) return send(400, '<!doctype html><meta charset="utf-8"><title>登录已过期</title><p>登录请求已过期。</p><a href="' + this.practice.origin + '/auth/hub">返回刷题页重新登录</a>');
       const token = cookie(req, 'qfh_session'), user = await this.identity(token);
-      if (!user) return send(200, loginPage(this.hub.origin));
+      if (!user) return redirect(`${this.hub.origin}/manage/#practice-login/${request}`);
       if (this.codes.size >= 10000) throw new CloudError(503, '登录请求较多，请稍后重试');
       if (pending.code) this.codes.delete(pending.code);
       const code = fresh(); pending.code = hash(code);
@@ -103,9 +101,3 @@ export class HubLogin {
     return false;
   }
 }
-
-const loginScript = `const form=document.querySelector('form');form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button'),error=document.querySelector('[role=alert]');button.disabled=true;error.textContent='';try{const response=await fetch('/api/auth/login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:form.elements.email.value,password:form.elements.password.value})});form.elements.password.value='';if(response.ok){location.replace(location.pathname+location.search);return;}error.textContent=response.status===429?'尝试次数较多，请稍后重试。':'登录失败，请检查邮箱和密码。';}catch{error.textContent='连接失败，请稍后重试。';}finally{button.disabled=false;}});`;
-function loginPage(hubOrigin) {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 · QuizForge Hub</title><link rel="stylesheet" href="/practice-auth/login.css"><script defer src="/practice-auth/login.js"></script></head><body><main><section class="panel"><img class="brand" src="/quizforge-icon.png" width="46" height="46" alt="QuizForge"><h1>登录 QuizForge Hub</h1><p>登录后直接进入你的云端刷题空间。</p><form><label>邮箱<input name="email" type="email" autocomplete="username" maxlength="180" required></label><label>密码<input name="password" type="password" autocomplete="current-password" maxlength="128" required></label><p class="error" role="alert"></p><button type="submit">登录并开始刷题</button></form><p class="register">还没有账号？<a href="${hubOrigin}/manage/#library" target="_blank" rel="noopener noreferrer">前往 Hub 注册</a>，完成后回到本页登录。</p></section></main></body></html>`;
-}
-const loginStyle = `*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;font:14px/1.7 system-ui,-apple-system,"Segoe UI",sans-serif;color:#42354f;background:linear-gradient(145deg,#e4def6,#f8e9ed 65%,#ded5f1)}main{width:min(420px,100%)}.panel{padding:34px;border:1px solid #eee7f6;border-radius:22px;background:#fffffff0;box-shadow:0 20px 80px #6d468520}.brand{border-radius:12px}h1{margin:16px 0 4px;font-size:23px}p{color:#84768f;margin:0 0 22px}form{display:grid;gap:16px}label{display:grid;gap:7px;font-weight:550}input{width:100%;font:inherit;padding:11px 12px;border:1px solid #ded4eb;border-radius:9px;background:#fff;color:#42354f}input:focus-visible{outline:2px solid #baa5ed;outline-offset:2px}button{border:0;border-radius:9px;padding:12px;background:#8761d4;color:#fff;font:600 14px/1.5 system-ui;cursor:pointer}button:disabled{opacity:.6;cursor:wait}.error{margin:0;color:#a13c63;font-size:13px}.error:empty{display:none}.register{margin:22px 0 0;font-size:12px}a{color:#7950b9;text-underline-offset:3px}@media(max-width:480px){.panel{padding:26px}}`;

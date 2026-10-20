@@ -49,7 +49,13 @@ test('Hub login handoff binds browser state, uses one-time short-lived codes, ch
     return { verifier, route: authorize.pathname + authorize.search };
   };
   const a = await begin();
-  const signIn = await request(a.route, 'hub.example'); assert.equal(signIn.status, 200); assert.match(await signIn.text(), /登录并开始刷题/);
+  const signIn = await request(a.route, 'hub.example'); assert.equal(signIn.status, 303);
+  const sharedLogin = new URL(signIn.headers.get('location'));
+  assert.equal(sharedLogin.origin, 'https://hub.example'); assert.equal(sharedLogin.pathname, '/manage/');
+  assert.equal(sharedLogin.hash, '#practice-login/' + new URL(a.route, 'https://hub.example').searchParams.get('request'));
+  assert.equal(sharedLogin.href.includes(hubToken), false);
+  assert.equal((await request('/practice-auth/login.js', 'hub.example')).status, 404);
+  assert.equal((await request('/practice-auth/authorize?request=' + 'f'.repeat(64), 'hub.example')).status, 400);
   const granted = await request(a.route, 'hub.example', { Cookie: 'qfh_session=' + hubToken }); assert.equal(granted.status, 303);
   const callback = new URL(granted.headers.get('location')), callbackRoute = callback.pathname + callback.search;
   assert.equal(callback.href.includes(hubToken), false);
