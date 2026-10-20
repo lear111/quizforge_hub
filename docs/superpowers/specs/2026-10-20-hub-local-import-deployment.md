@@ -22,14 +22,20 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8")]
 ```
 
-建议由本地维护会话把该声明加入 `core/desktop/windows/AssemblyInfo.cs`，再通过既有脚本重建启动器和安装包。不固定为 TLS 1.2、不关闭证书验证、不改系统注册表。微软对目标框架及系统 TLS 默认行为的说明见 [TLS 最佳实践](https://learn.microsoft.com/en-us/dotnet/framework/network-programming/tls)。
+已在 Web 独立分支 `fix/hub-client-tls-framework` 将该声明加入 `core/desktop/windows/AssemblyInfo.cs`，修复提交 `a8ee52de63c15d7e43b6b724b54177fa7132e6bb`；本地 `main` 与原会话工作区保持原样。不固定为 TLS 1.2、不关闭证书验证、不改系统注册表。微软对目标框架及系统 TLS 默认行为的说明见 [TLS 最佳实践](https://learn.microsoft.com/en-us/dotnet/framework/network-programming/tls)。
 
 带此一行修正的独立原生测试 EXE 已完成：官方 HTTPS 清单 → 原始 `.qbank` 下载与 SHA-256 校验 → 隔离本地 `/api/library/import` → 47 本题库出现在目录。未覆盖或重启用户正在运行的 QuizForge，也未修改用户题库、源码、安装包或正式协议注册。
 
-本地应补充目标框架元数据回归，防止构建或测试入口再次丢失此声明；再执行现有 Hub 导入和 Windows 启动器测试，最后验证安装包升级及浏览器真实点击。测试证据与程序均留在任务根目录 `.temp`，没有将生产数据或个人凭据放入 Git。
+已补充编译后运行时目标框架与 TLS 兼容开关检查，Hub 专项 7/7 通过。Windows 托盘 12 项通过；冷启动重复导入用例曾因两个启动进程争抢所有权而超时，补上控制查询等待后该项重跑通过。首次隔离运行暴露的 `.temp` 父目录缺失也已修正。没有把初次失败记录成通过。
+
+修复源码编译的原生下载器再次从正式 HTTPS Hub 下载并在独立目录导入 47 本题库，未使用临时 TLS 配置或额外目标框架注入。
+
+已生成 `quizforge_web/dist/QuizForge-0.1.0-next.2-tlsfix.1-win-x64-setup.exe`，25,172,306 字节，SHA-256 为 `423fd058ff8abe686969911eefbe56404fdcbd26c1f2aa4d8423882e534e2776`；安装包内 RELEASE.json 记录上述 Web 修复提交和启动器摘要。用户需先保存作答、退出托盘，再覆盖升级；尚未替用户更新正在使用的安装版。
+
+已对该安装包同一 payload 执行隔离安装器验收并通过：安装、真实文件导入、运行时升级拦截、覆盖升级保留题库/设置/答案/冻结历史、卸载保留数据、协议冲突与清理边界。使用独立 AppId 和测试 scheme，没有修改用户正式 `.qbank` 或 `quizforge` 注册项。报告位于任务根目录 `.temp/web-hub-tls-fix/.temp/installer-acceptance-box0iN/report.json`。
 
 ## 当前交付边界
 
-Hub 新按钮已经上线；用户刷新详情页后可见“下载到本地”和“下载 .qbank 文件”。安装版未补齐目标框架前，直接唤醒后的 HTTPS 下载仍可能失败，文件下载与本地导入继续可用。
+Hub 新按钮已经上线；用户刷新详情页后可见“下载到本地”和“下载 .qbank 文件”。安装修正版之前，旧客户端的 HTTPS 下载仍可能失败，文件下载与本地导入继续可用。
 
-本会话遵循之前“本地交给其他会话负责”的分工，已向用户询问由谁合入这一处修复。浏览器工具仍报告被 Work 设置禁用，不能把 HTTP 与隔离原生验证当作真实浏览器/系统唤醒验收。
+针对用户继续询问如何修复，本会话已将这一处兼容补丁与回归检查在独立 Web 分支完成并打包，未改其他会话的 checkout。主线合并与后续正式发布仍需按既有协作流程处理。浏览器工具仍报告被 Work 设置禁用，不能把 HTTP 与隔离原生验证当作真实浏览器/系统唤醒验收。
