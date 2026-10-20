@@ -23,9 +23,9 @@
 ```bash
 cd /opt/quizforge-hub/current
 export DATA_DIR=/var/lib/quizforge-hub
-node scripts/admin.mjs invite-create 管理员邮箱 10 30
-node scripts/admin.mjs invite-list 管理员邮箱
-node scripts/admin.mjs invite-revoke 管理员邮箱 邀请码ID
+/opt/quizforge-node/bin/node scripts/admin.mjs invite-create 管理员邮箱 10 30
+/opt/quizforge-node/bin/node scripts/admin.mjs invite-list 管理员邮箱
+/opt/quizforge-node/bin/node scripts/admin.mjs invite-revoke 管理员邮箱 邀请码ID
 ```
 
 创建示例为 10 个、有效期 30 天，每次最多 100 个，最长 365 天。建议用 `umask 077` 并将创建命令输出保存到仅维护者可读的文件，再逐个发放。列表只显示识别前缀、状态及已兑换账号，不再显示完整邀请码。生成邀请码不会向用户自动发消息。
@@ -41,3 +41,14 @@ Hub 设置 `PRACTICE_ORIGIN=https://practice.treenewbee.cloud`，不需要启用
 运行 `node --test test/*.test.mjs`。云端集成检查要求 `.runtime/web-current/snapshot.json` 已存在，不能把缺少快照时的跳过当作通过。新检查涵盖邀请注册竞争、失败回滚、重启、撤销、管理员命令、受限登录返回地址、下载损坏/上限/清理和两个真实实例的格式 3 下载导入与所有权。
 
 浏览器实点与外观验收另行记录。当前工具提示 Work 设置禁用浏览器操作，HTTP/原生测试不等同于页面实点验收。
+
+## 2026-10-20 发布记录
+
+- 功能提交 `4abb77b`，源码发布包 SHA-256 `93f25d06e4dc31a2101effd0798f8c670286095ec398f7a931fff31af0cdee6d`。
+- 两服务发布目录均为各自的 `releases/20261020-invite-cloud-4abb77b-r2`；备份均在各自 `backups/20261020-invite-cloud-4abb77b-r2/data`。发布前后原业务表记录数一致，SQLite quick_check 通过。
+- 练习沿用原快照，`snapshot.json` SHA-256 为 `4458cdd81e13715e4467d03381e7891f8547a7058d4b7e70b4948959ab21e196`。没有修改本地 Web 仓库。
+- Windows 回归 51 通过、1 项软链接权限跳过；首尔同一源码包 52/52 通过，无跳过，实际加载固定运行快照。两个合成真实实例已完成公开格式 3 基础题库的下载、云端导入和练习页面读取。
+- 首次切换的 loopback 健康检查未带练习站 Host，被访问校验拒绝，发布脚本自动回退成功；修正 Host 后第二次切换成功。没有恢复旧数据库覆盖用户写入。
+- 正式 HTTPS 已检查导航/下载脚本、邀请码字段、无邀请码拒绝发送邮件、登录接力、固定返回地址、匿名导入拒绝及新增静态资源。记录在任务根目录 `.temp/hub-invite-cloud-public-qa.json`。未创建生产测试账号、未使用生产账号密码或会话。
+- 现有公共“考研英语”经正式 HTTPS 下载到隔离环境后，被摘要审核拦截，未写入生产练习数据。其格式 3 包含 8 个自定义拓展（全文翻译、分句翻译、完形填空、段落排序、英语作文、阅读匹配、阅读理解、阅读选填，版本均为 1.0.0），不属于当前四个基础拓展白名单；尚未完成代码安全审核，不能宣称这份题库已能在云端使用。需要后续逐项审核并登记摘要。
+- 邀请码生成、查询和停用命令已通过合成数据测试；本次未自动创建或发放生产邀请码。管理员按上述命令生成即可。
