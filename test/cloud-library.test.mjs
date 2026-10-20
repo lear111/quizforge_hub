@@ -1,0 +1,98 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
+import { CloudAccounts } from '../cloud/accounts.mjs';
+import { CloudLibrary, treeBytes } from '../cloud/library.mjs';
+import { extensionDigest } from '../cloud/extension-review.mjs';
+import { Readable } from 'node:stream';
+
+const snapshot = path.resolve(fileURLToPath(new URL('../.runtime/web-current', import.meta.url)));
+const alice = '11111111-1111-4111-8111-111111111111', bob = '22222222-2222-4222-8222-222222222222', admin = '33333333-3333-4333-8333-333333333333';
+test('审核摘要包含编辑器、资源、示例和额外文件，仅导入显示名称与示例绑定不改变摘要', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'qfh-review-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(directory, 'examples'));
+  const manifest = { id: 'test', version: '1', name: 'original', examples: 'examples/bank.json', rules: 'rules.js' };
+  fs.writeFileSync(path.join(directory, 'manifest.json'), JSON.stringify(manifest));
+  fs.writeFileSync(path.join(directory, 'examples/bank.json'), JSON.stringify({ extension: { path: 'extensions/one/test' }, questions: [] }));
+  fs.writeFileSync(path.join(directory, 'rules.js'), 'return 1;'); fs.writeFileSync(path.join(directory, 'editor.js'), 'const a=1;');
+  const original = extensionDigest(directory).digest;
+  fs.writeFileSync(path.join(directory, 'manifest.json'), JSON.stringify({ ...manifest, name: 'renamed' }, null, 2));
+  fs.writeFileSync(path.join(directory, 'examples/bank.json'), JSON.stringify({ extension: { path: 'extensions/two/test' }, questions: [] }, null, 2));
+  assert.equal(extensionDigest(directory).digest, original);
+  fs.appendFileSync(path.join(directory, 'editor.js'), 'const b=2;'); assert.notEqual(extensionDigest(directory).digest, original);
+  fs.writeFileSync(path.join(directory, 'editor.js'), 'const a=1;'); fs.writeFileSync(path.join(directory, 'extra.js'), 'malicious'); assert.notEqual(extensionDigest(directory).digest, original);
+});
+
+test('真实格式 3 云端导入：白名单先于运行、独立副本、配额回滚、所有权、导出与撤销', { skip: !fs.existsSync(snapshot) && 'Stage the pinned cloud runtime first' }, async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'qfh-cloud-library-')), db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE users(id TEXT PRIMARY KEY,name TEXT,email TEXT,admin INTEGER,created TEXT)');
+  for (const id of [alice, bob, admin]) db.prepare('INSERT INTO users VALUES (?,?,?,?,?)').run(id, id, id + '@example.test', id === admin ? 1 : 0, '');
+  const accounts = new CloudAccounts(db), library = await CloudLibrary.create(db, accounts, directory, snapshot);
+  t.after(async () => { await library.close(); db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  await assert.rejects(CloudLibrary.create(db, accounts, directory, snapshot), /already open/);
+  const first = await library.demo(alice);
+  assert.ok(first.bytes > 0); assert.equal(first.banks.length, 1); assert.equal(library.list(bob).length, 0);
+  const second = await library.demo(alice); assert.notEqual(first.id, second.id); assert.notEqual(first.banks[0].id, second.banks[0].id);
+  assert.equal(accounts.status(alice).usage.storageBytes, first.bytes + second.bytes);
+  assert.throws(() => library.owned(bob, first.id), /不存在/);
+  const download = await library.export(alice, first.id);
+  try { const item = await library.installFile(bob, admin, download.file, '定制题库.qbank', { kind: 'admin-delivery' }); assert.equal(item.source.kind, 'admin-delivery'); }
+  finally { download.close(); }
+  assert.equal(library.list(bob).length, 1);
+  const request = (method = 'GET', body) => Object.assign(Readable.from(body ? [Buffer.from(JSON.stringify(body))] : []), { method, headers: { 'content-type': 'application/json', 'x-quizforge-practice-session': '44444444-4444-4444-8444-444444444444' } });
+  const base = '/api/collections/bank/' + first.banks[0].id;
+  const raw = JSON.parse(fs.readFileSync(path.join(snapshot, 'basic-content/question-banks/基础题型/基础题型展示/bank.json'), 'utf8'));
+  const answer = { selectedOptionId: raw.questions[0].data.correctOptionId };
+  const questionPath = base + '/questions/single-sample-text';
+  const current = await library.practice.api(alice, first.id, questionPath, request());
+  assert.equal(current.status, 200, current.bytes.toString());
+  const state = JSON.parse(current.bytes), beforeSave = library.owned(alice, first.id).bytes;
+  const submit = await library.practice.api(alice, first.id, questionPath + '/actions', request('POST', { requestId: 'cloud-test-submit', revision: state.state.revision, contentVersion: state.stamp.contentVersion, action: 'submit', data: { answer } }));
+  assert.equal(submit.status, 200, submit.bytes.toString());
+  assert.equal(JSON.parse(submit.bytes).state.status, 'submitted');
+  assert.ok(library.owned(alice, first.id).bytes > beforeSave);
+  await assert.rejects(library.practice.api(bob, first.id, questionPath, request()), /不存在/);
+  await assert.rejects(library.practice.api(alice, first.id, '/api/settings/ai/credential', request()), /Hub/);
+  assert.match(library.practice.asset(alice, first.id, '').bytes.toString(), /我的云端题库/);
+  assert.match(library.practice.asset(alice, first.id, 'shared/api.js').bytes.toString(), new RegExp(`/api/cloud/practice/${first.id}`));
+  const savedUsage = accounts.status(alice).usage.storageBytes;
+  accounts.updateLimits(admin, alice, { storageBytes: savedUsage, dailyTrafficBytes: null, monthlyTrafficBytes: null }, '验证保存失败回滚');
+  await assert.rejects(library.practice.api(alice, first.id, base + '/questions/' + raw.questions[1].id + '/actions', request('POST', { requestId: 'cloud-test-overflow', revision: 0, action: 'draft', data: { answer: { selectedOptionId: raw.questions[1].data.correctOptionId } } })), /存储额度/);
+  assert.equal(accounts.status(alice).usage.storageBytes, savedUsage);
+  await assert.rejects(library.practice.api(alice, first.id, '/api/library/manage', request('POST', { kind: 'bank', target: 'group', action: 'create', path: '', name: '超额分组必须回滚', group: '' })), /存储额度/);
+  assert.equal(fs.existsSync(path.join(library.location(alice, first.id), 'question-banks/超额分组必须回滚')), false);
+  assert.equal(JSON.parse(library.owned(alice, first.id).catalog).groups.banks.includes('超额分组必须回滚'), false);
+  assert.equal(accounts.status(alice).usage.storageBytes, savedUsage);
+  accounts.updateLimits(admin, alice, { storageBytes: null, dailyTrafficBytes: null, monthlyTrafficBytes: null }, '恢复测试额度');
+  await assert.rejects(library.installFile(alice, bob, path.join(snapshot, 'basic-demo.qbank'), 'bad.qbank'), /管理员/);
+  accounts.updateLimits(admin, bob, { storageBytes: 1, dailyTrafficBytes: null, monthlyTrafficBytes: null }, '验证满额');
+  await assert.rejects(library.demo(bob), /存储额度/);
+  assert.equal(library.list(bob).length, 1); assert.equal(fs.readdirSync(library.work).length, 0); assert.equal(accounts.status(bob).usage.reservedStorageBytes, 0);
+  // Modify a real extension before repacking. It must never reach the rule
+  // engine, even though id/version match an approved built-in extension.
+  const malicious = path.join(directory, 'malicious'); fs.mkdirSync(malicious);
+  const archive = new library.runtime.LibraryArchive(malicious, new library.runtime.ResourceStore(malicious));
+  const content = path.join(malicious, 'content'); fs.mkdirSync(content);
+  await archive.unzip(path.join(snapshot, 'basic-demo.qbank'), content);
+  const extensions = library.runtime.scanExtensions(path.join(content, 'extensions'));
+  fs.appendFileSync(path.join(extensions[0], 'editor.js'), '\n// unapproved modification');
+  const file = path.join(malicious, 'modified.qbank'); await archive.zip(content, file);
+  let runs = 0; const originalRun = library.engine.run;
+  library.engine.run = (...args) => { runs++; return originalRun(...args); };
+  await assert.rejects(library.installFile(alice, alice, file, 'modified.qbank'), /摘要尚未获准/);
+  assert.equal(runs, 0); assert.equal(library.list(alice).length, 2);
+  const reviewed = library.reviews.list()[0]; library.reviews.revoke(admin, reviewed.digest, '测试撤销');
+  await assert.rejects(library.demo(alice), /审核已撤销/);
+  assert.equal(accounts.status(alice).usage.storageBytes, savedUsage);
+  assert.equal(fs.readdirSync(library.work).length, 0);
+  assert.ok(treeBytes(library.location(alice, first.id)) >= first.bytes);
+  await assert.rejects(library.delete(bob, first.id), /不存在/);
+  await library.delete(alice, second.id);
+  assert.equal(library.list(alice).length, 1);
+  assert.equal(accounts.status(alice).usage.storageBytes, savedUsage - second.bytes);
+});

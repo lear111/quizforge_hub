@@ -1,6 +1,7 @@
 import { enhanceLocalImport } from './local-import.js';
 let localImport = null;
 const $ = selector => document.querySelector(selector);
+let cloudEnabled = false;
 const app = $('#app');
 const icons = { plus: '<path d="M12 5v14M5 12h14"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>', grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>', book: '<path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1v15"/>', award: '<circle cx="12" cy="9" r="6"/><path d="m8 14-2 7 6-3 6 3-2-7"/>', code: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6m-3-14-2 16"/>', globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>', folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>', download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>', chat: '<path d="M21 11a9 9 0 0 1-9 9H3l2-5a9 9 0 1 1 16-4z"/>', upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>', image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="2"/><path d="m21 16-5-5-8 10"/>', check: '<path d="m5 12 4 4L19 6"/>', arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>', edit: '<path d="m16 3 5 5-12 12-6 1 1-6L16 3zM14 5l5 5"/>' };
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.book}</svg>`;
@@ -76,6 +77,17 @@ const jsonOptions = (body, method = 'POST') => ({ method, headers: { 'Content-Ty
 function toast(message) { const node = $('#toast'); node.textContent = message; node.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 4500); }
 function account() {
   $('#account').innerHTML = `${user ? `<div class="user-chip"><a href="#mine" class="avatar" title="我的分享">${esc(Array.from(user.name)[0])}</a><a href="#mine" class="name">${esc(user.name)}</a><button class="text-button" data-action="logout">退出</button></div>${user.admin ? '<a class="text-button" href="#reviews">审核管理</a>' : ''}` : '<button class="text-button" data-action="login">登录 / 注册</button>'}<a href="#upload" class="button">${icon('plus')}<span>分享题库</span></a>`;
+  if (cloudEnabled) {
+    document.title = 'QuizForge Hub · 题库广场'; const subtitle = document.querySelector('.brand small'); if (subtitle) subtitle.textContent = 'Hub';
+    const link = document.createElement('a'); link.className = 'text-button'; link.href = '/cloud/'; link.textContent = '云端空间'; $('#account').prepend(link);
+  }
+}
+function cloudDownloadButton() {
+  if (!cloudEnabled) return;
+  const download = document.querySelector('[data-action="download"]');
+  if (!download || document.querySelector('[data-action="download-cloud"]')) return;
+  download.innerHTML = icon('download') + '下载到本地（.qbank）';
+  download.insertAdjacentHTML('beforebegin', '<button class="button" data-action="download-cloud">下载到云端</button><p class="cloud-download-status" role="status"></p>');
 }
 function empty(title, description, action = '<a class="button small" href="#upload">分享第一个题库 ' + icon('arrow') + '</a>') { return `<div class="empty"><div class="empty-symbol">${icon('book')}</div><h3>${title}</h3><p>${description}</p>${action}</div>`; }
 const statusNames = { pending: '待审核', approved: '已通过', rejected: '已驳回' };
@@ -166,10 +178,23 @@ document.addEventListener('click', async event => {
     if (action === 'close-dialog') { element.closest('dialog').close(); return; }
     if (action === 'login') { showAuth('login', location.hash); return; }
     if (action === 'send-email-code') { await sendEmailCode(); return; }
-    if (action === 'logout') { await api('/api/auth/logout', { method: 'POST' }); user = null; account(); toast('已退出登录'); if (location.hash === '#library') await render(); else location.hash = '#library'; return; }
+    if (action === 'logout') { await api('/api/auth/logout', { method: 'POST' }); if (typeof BroadcastChannel !== 'undefined') { const channel = new BroadcastChannel('qfh-account'); channel.postMessage('logout'); channel.close(); } user = null; account(); toast('已退出登录'); if (location.hash === '#library') await render(); else location.hash = '#library'; return; }
     if (action === 'guidelines') { guidelines(); return; }
     if (action === 'reset-search') { filters = { q: '', sort: 'latest', page: 1 }; await render(); return; }
     if (action === 'retry') { await render(); return; }
+    if (action === 'download-cloud' || action === 'download-cloud-copy') {
+      if (!user) { showAuth('login', location.hash); return; }
+      const status = document.querySelector('.cloud-download-status'); element.disabled = true;
+      if (status) status.textContent = '正在校验与导入到云端…';
+      try {
+        await api('/api/cloud/library/from-hub', jsonOptions({ packId: currentPack.id, revision: currentPack.revision, newCopy: action === 'download-cloud-copy' }));
+        if (status) { status.textContent = ''; const link = document.createElement('a'); link.href = '/cloud/'; link.textContent = '已添加，打开我的云端题库 →'; status.append(link); }
+      } catch (error) {
+        if (status) status.textContent = error.message;
+        if (error.message.includes('此版本已在云端') && status) { const button = document.createElement('button'); button.className = 'text-button'; button.dataset.action = 'download-cloud-copy'; button.textContent = '再创建一个独立副本'; status.append(button); const link = document.createElement('a'); link.href = '/cloud/'; link.textContent = '打开已有题库'; status.append(link); }
+      } finally { element.disabled = false; }
+      return;
+    }
     if (action === 'download') {
       const pack = currentPack; const previousLabel = element.innerHTML; element.disabled = true; element.textContent = '下载中…';
       try {
@@ -225,5 +250,6 @@ document.addEventListener('submit', async event => {
 window.addEventListener('hashchange', () => { document.querySelectorAll('dialog[open]').forEach(d => d.close()); window.scrollTo(0, 0); render(); });
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', event => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } });
 $('#auth-dialog').addEventListener('close', clearCaptcha);
-try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; } catch (error) { toast(error.message); }
-account(); await render();
+try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; cloudEnabled = config.cloudEnabled; } catch (error) { toast(error.message); }
+account(); await render(); cloudDownloadButton();
+new MutationObserver(cloudDownloadButton).observe(app, { childList: true, subtree: true });
