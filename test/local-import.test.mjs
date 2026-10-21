@@ -67,6 +67,7 @@ test('public v1 manifest and fixed version deliver exact bytes without metadata 
   const response = await app.request(app.pinned); assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-type'), 'application/octet-stream');
   assert.equal(Number(response.headers.get('content-length')), bytes.length);
+  assert.equal(response.headers.get('content-encoding'), null);
   assert.equal(response.headers.get('cache-control'), 'private, no-store');
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
   assert.equal(app.downloads(), 1); assert.equal(app.traffic(), bytes.length);

@@ -50,3 +50,23 @@ test('same-origin inline cloud import still cancels default and reports progress
   await handler(click);
   assert.equal(click.defaultPrevented, true); assert.equal(button.disabled, false); assert.equal(status.textContent, '');
 });
+
+test('the shared desktop/Android scheme anchor is not intercepted by the Hub listener', async () => {
+  const anchor = { dataset: { localImport: '' }, hasAttribute: () => false };
+  const click = event(anchor); await listener({ user: null })(click);
+  assert.equal(click.defaultPrevented, false);
+});
+
+test('anonymous file fallback uses the existing download route without login or app launch', async () => {
+  const navigations = [];
+  const button = { dataset: { action: 'download' }, hasAttribute: () => false, innerHTML: '下载题库文件' };
+  const click = event(button);
+  await listener({ user: null, currentPack: { id: 'public-bank', archive: { name: 'example.qbank' } },
+    api: async route => { assert.equal(route, '/api/packs/public-bank/download-status'); }, toast() {},
+    showAuth: () => assert.fail('public downloads must stay anonymous'),
+    document: { body: { append() {} }, createElement: tag => { assert.equal(tag, 'a'); return { click() { navigations.push([this.href, this.download]); }, remove() {} }; } },
+  })(click);
+  assert.equal(click.defaultPrevented, true);
+  assert.deepEqual(navigations, [['/api/packs/public-bank/download', 'example.qbank']]);
+  assert.equal(button.disabled, false); assert.equal(button.innerHTML, '下载题库文件');
+});

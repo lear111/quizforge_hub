@@ -69,7 +69,7 @@ Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 
 | `COOKIE_SECURE` | `0` | 本地 HTTP 为 0，生产 HTTPS 必须为 1 |
 | `INVITATION_REQUIRED` | `0` | 首次初始化邀请码验证开关；后续在管理后台的邀请码页面保存，重启保留管理员选择 |
 | `TRUST_PROXY` | `0` | 生产只有在 Node 端口不对外开放、反向代理覆盖 `X-Real-IP` 时才设为 1 |
-| `LOCAL_IMPORT_ENABLED` | `0` | 设为 1 开启公共 `.qbank` 的本地唤醒入口及固定版本下载接口；须先提供支持协议 v1 的 Windows 安装版 |
+| `LOCAL_IMPORT_ENABLED` | `0` | 设为 1 开启公共 `.qbank` 的本地唤醒入口及固定版本下载接口；当前设备需安装支持协议 v1 的 QuizForge 客户端 |
 | `MAX_ARCHIVE_MB` | `20` | 单个压缩包上限，MiB；调整时同步修改反向代理请求体限制 |
 | `USER_QUOTA_MB` | `500` | 单个上传者附件存储上限，MiB |
 | `TOTAL_QUOTA_MB` | `5000` | 所有题库附件存储总上限，MiB |
@@ -83,11 +83,15 @@ Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 
 
 ## 下载到本地 QuizForge
 
-`LOCAL_IMPORT_ENABLED=1` 后，公开 `.qbank` 的详情页提供“下载到本地”，通过 `quizforge://hub/import?v=1&pack=<id>&revision=<revision>` 请求打开已安装的 QuizForge。客户端从官方 Hub 获取清单和固定版本附件，校验后导入。Hub 清单请求不计下载；二进制下载沿用站点/IP 预算与保守预留，原生公共下载不消耗云端个人存储或个人下载额度。
+`LOCAL_IMPORT_ENABLED=1` 后，已审核公开 `.qbank` 的详情页提供“下载题库文件”“下载并导入到本地”，云端功能开启时还有“下载并导入到云端”。本地入口说明为“导入当前设备上的 QuizForge，支持电脑和安卓手机、平板。”；云端入口说明为“导入账号的云端题库，需登录。”。
 
-网页只显示已请求打开，实际结果以本地应用为准。普通文件下载始终保留；ZIP、RAR、7Z 不提供直接导入。应用仅支持包内 `formatVersion: 3` 的单题库包和分组包，旧格式 1、2 需制作者升级，与题目年份或题库自身版本号无关。
+电脑和 Android 共用 `quizforge://hub/import?v=1&pack=<id>&revision=<revision>`，由当前设备系统唤起已安装的客户端，无需选择平台。链接只包含协议版本、小写题库 UUID 和正整数 Hub revision。客户端从官方 Hub 获取清单和固定版本附件，校验后导入。Hub 清单请求不计下载；二进制下载沿用站点/IP 预算与保守预留，原生公共下载不消耗云端个人存储或个人下载额度。
 
-协议、错误码和两端验收见 [导入协议 v1](docs/superpowers/specs/2026-10-20-hub-local-import-design.md)。此开关独立于云端刷题功能，默认关闭；部署代码不代表已经启用或完成真实浏览器到 Windows 的唤醒验收。
+点击后网页只显示“已请求打开 QuizForge，请在系统提示中允许打开”，不判断安装状态或宣称下载、导入成功。普通文件下载始终保留且不增加登录要求；ZIP、RAR、7Z 和未公开附件不提供直接导入。Windows 安装入口沿用 `/` 下载指引，Android 显示“安装包待发布”，待正式发布地址和签名确定后再配置，不猜测 APK 地址。
+
+应用仅支持包内 `formatVersion: 3` 的单题库包和分组包，旧格式 1、2 需制作者升级，与题目年份或题库自身版本号无关。原生客户端继续检查拓展能力，不能为一键导入放宽兼容范围。
+
+协议、错误码见 [导入协议 v1](docs/superpowers/specs/2026-10-20-hub-local-import-design.md)，本次入口调整与联合验收边界见 [Android 一键导入交接](docs/HUB_ANDROID_IMPORT.md)。此开关独立于云端刷题功能，默认关闭；源码或自动测试通过不代表已部署、已开启入口或完成实际浏览器、系统唤起提示和真机验收。
 
 ## 公开上线前仍需完成
 

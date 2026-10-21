@@ -13,16 +13,25 @@ export function enhanceLocalImport({ document, pack, config }) {
   if (!download || !href || document.querySelector('[data-local-import]')) return;
   const open = document.createElement('a');
   open.className = 'button'; open.href = href; open.dataset.localImport = '';
-  open.textContent = '下载到本地';
-  const status = document.createElement('p'); status.className = 'download-note'; status.setAttribute('role', 'status');
+  open.textContent = '下载并导入到本地'; open.setAttribute('aria-describedby', 'local-import-description');
+  const option = document.createElement('div'); option.className = 'download-option';
+  const description = document.createElement('p'); description.id = 'local-import-description'; description.className = 'download-note';
+  description.textContent = '导入当前设备上的 QuizForge，支持电脑和安卓手机、平板。';
+  const status = document.createElement('p'); status.className = 'download-note'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   open.addEventListener('click', () => {
-    status.textContent = '已请求打开 QuizForge，请在浏览器提示中允许打开。导入结果请查看本地 QuizForge。';
+    status.textContent = '已请求打开 QuizForge，请在系统提示中允许打开';
   });
   // Keep this a real user-activated link: no asynchronous preflight, installation
   // detection, timer retries or claims that the native import has succeeded.
-  download.before(open);
-  download.textContent = '下载 .qbank 文件'; download.classList.add('secondary');
+  option.append(open, description, status); download.after(option);
+  download.textContent = '下载题库文件'; download.classList.add('secondary');
+  const installers = document.createElement('div'); installers.className = 'download-installers';
   const install = document.createElement('a'); install.href = '/'; install.className = 'text-button';
-  install.textContent = '安装／升级 QuizForge';
-  download.after(install, status);
+  install.textContent = '安装／升级 Windows 版';
+  // Android release URL and signing identity are not configured yet. Do not
+  // guess an APK address or send Android users to the Windows download.
+  const android = document.createElement('span'); android.className = 'download-note'; android.textContent = 'Android 安装包待发布';
+  const fallback = document.createElement('p'); fallback.className = 'download-note'; fallback.textContent = '未安装客户端或浏览器未唤起时，可下载题库文件后手动导入。';
+  installers.append(install, android, fallback);
+  (document.querySelector('[data-action="download-cloud"]')?.closest('.download-option') || option).after(installers);
 }
