@@ -4,7 +4,7 @@ import path from 'node:path';
 import { CloudError } from '../cloud/accounts.mjs';
 import { bytes, filename, jsonBody, reason, send, uuid } from './common.mjs';
 
-export function createHubAdmin({ db, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, cloud, token, uploadDir, enabled, officialAi, verifyPassword, shanghaiDay }) {
+export function createHubAdmin({ db, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, cloud, token, uploadDir, enabled, officialAi, aiPoints, verifyPassword, shanghaiDay }) {
   db.exec(`CREATE TABLE IF NOT EXISTS pack_admin_reviews(pack_id TEXT NOT NULL,revision INTEGER NOT NULL,sha256 TEXT NOT NULL,submission TEXT NOT NULL,PRIMARY KEY(pack_id,revision,sha256));
     CREATE TABLE IF NOT EXISTS pack_cloud_approvals(pack_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,sha256 TEXT NOT NULL,digests TEXT NOT NULL,status TEXT NOT NULL,actor_id TEXT NOT NULL,created INTEGER NOT NULL);`);
   const audit = (actor, action, target, detail) => db.prepare('INSERT INTO admin_audit VALUES (?,?,?,?,?,?)').run(randomUUID(), actor, target, action, JSON.stringify(detail), Date.now());
@@ -54,7 +54,20 @@ export function createHubAdmin({ db, invitations, invitationPolicy, metrics, req
         catch (error) { db.exec('ROLLBACK'); throw error; }
       }
       const day = shanghaiDay(Date.now());
-      value = { ...officialAi.adminStatus(), usage: officialAi.usage(day, day.slice(0, 7)) };
+      value = { ...officialAi.adminStatus(), usage: officialAi.usage(day, day.slice(0, 7)), points: aiPoints.summary() };
+    }
+    // AI redeem codes are the only way to add points; full codes appear once, in this response.
+    else if (route === '/ai-codes' && req.method === 'GET' && aiPoints) value = { items: aiPoints.listCodes() };
+    else if (route === '/ai-codes' && req.method === 'POST' && aiPoints) {
+      throttle(req, 'admin-ai-codes', 10, actor.id);
+      const input = await jsonBody(req);
+      value = { items: aiPoints.createCodes(actor.id, input) };
+      audit(actor.id, 'ai-codes-created', 'ai-codes', { count: value.items.length, points: input.points, days: input.days, note: input.note || '' });
+      status = 201;
+    }
+    else if (/^\/ai-codes\/[a-f0-9-]{36}\/revoke$/.test(route) && req.method === 'POST' && aiPoints) {
+      const row = aiPoints.revokeCode(route.split('/')[2]);
+      audit(actor.id, 'ai-code-revoked', row.id, { prefix: row.prefix, points: row.points }); value = { ok: true };
     }
     else if (route === '/invitations' && req.method === 'GET') value = { items: invitations.list(actor.id), invitationRequired: invitationPolicy.required() };
     else if (route === '/invitations/settings' && req.method === 'PUT') {

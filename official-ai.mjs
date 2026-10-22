@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { ConnectError } from './connect.mjs';
 
 // Official AI gateway (docs/HUB_CONNECT_AI.md section 6). The upstream key stays
-// here. Only counts and token totals are stored; request and response content
-// is never written to the database or logs.
+// here. Each grading spends the account's AI points by the tokens it used. Only
+// counts, token totals and points are stored; request and response content is
+// never written to the database or logs.
 const MiB = 1024 * 1024;
 const FIELDS = new Set(['model', 'messages', 'max_tokens', 'response_format', 'temperature']);
 const IMAGE = /^data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/;
@@ -16,7 +17,7 @@ export function officialAiSettings(env = process.env) {
     baseUrl: (env.OFFICIAL_AI_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/+$/, ''),
     model: env.OFFICIAL_AI_MODEL || 'qwen-vl-plus',
     key: env.OFFICIAL_AI_KEY || '',
-    dailyLimit: Number(env.OFFICIAL_AI_DAILY_LIMIT || 20),
+    tokensPerPoint: Number(env.OFFICIAL_AI_TOKENS_PER_POINT || 1000),
     monthlyTokens: Number(env.OFFICIAL_AI_MONTHLY_TOKENS || 10000000),
   };
 }
@@ -52,9 +53,13 @@ export function validateCompletion(body) {
   return { messages: body.messages, max_tokens: body.max_tokens ?? 8192, ...(Object.hasOwn(body, 'temperature') ? { temperature: body.temperature } : {}), ...(body.response_format ? { response_format: body.response_format } : {}) };
 }
 
-export function createOfficialAi({ db, settings: source, connect, json, readBody, now = () => Date.now(), fetchImpl = globalThis.fetch, timeoutMs = 90000, siteConcurrency = 8 }) {
+// A successful grading costs at least 1 point; tokens round up to whole points.
+export const pointsFor = (tokens, tokensPerPoint) => Math.max(1, Math.ceil(tokens / tokensPerPoint));
+
+export function createOfficialAi({ db, settings: source, connect, points, json, readBody, now = () => Date.now(), fetchImpl = globalThis.fetch, timeoutMs = 90000, siteConcurrency = 8 }) {
   db.exec(`CREATE TABLE IF NOT EXISTS official_ai_usage (user_id TEXT NOT NULL REFERENCES users(id), day TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day));
     CREATE TABLE IF NOT EXISTS official_ai_budget (period TEXT PRIMARY KEY, tokens INTEGER NOT NULL);`);
+  if (!db.prepare('PRAGMA table_info(official_ai_usage)').all().some(column => column.name === 'points')) db.exec('ALTER TABLE official_ai_usage ADD COLUMN points INTEGER NOT NULL DEFAULT 0');
   // Settings may change from the admin backend; read them on every request.
   const read = typeof source === 'function' ? source : () => source;
   const active = new Map();
@@ -62,21 +67,19 @@ export function createOfficialAi({ db, settings: source, connect, json, readBody
   const usedTokens = time => db.prepare('SELECT tokens FROM official_ai_budget WHERE period=?').get(month(time))?.tokens || 0;
   const usage = userId => {
     const settings = read();
-    const time = now(), day = shanghaiDay(time), used = db.prepare('SELECT calls FROM official_ai_usage WHERE user_id=? AND day=?').get(userId, day)?.calls || 0;
-    return { enabled: settings.enabled && !!settings.key && usedTokens(time) < settings.monthlyTokens, model: '通义千问 ' + settings.model, vision: true, dailyLimit: settings.dailyLimit, usedToday: used, resetAt: nextShanghaiMidnight(time) };
+    return { enabled: settings.enabled && !!settings.key && usedTokens(now()) < settings.monthlyTokens, model: '通义千问 ' + settings.model, vision: true, points: points.balance(userId), tokensPerPoint: settings.tokensPerPoint };
   };
   connect.setUsage(usage);
-  const refund = (userId, day) => db.prepare('UPDATE official_ai_usage SET calls=MAX(calls-1,0) WHERE user_id=? AND day=?').run(userId, day);
 
   async function handle(req, res, url) {
     if (url.pathname !== '/api/ai/v1/chat/completions') return false;
     const settings = read();
     if (req.method !== 'POST') fail(405, 'AI_REQUEST_UNSUPPORTED', '只支持 POST');
-    if (!settings.enabled) fail(404, 'OFFICIAL_AI_DISABLED', '官方 AI 暂未开放');
+    if (!settings.enabled) fail(404, 'OFFICIAL_AI_DISABLED', '免费 AI 暂未开放');
     const device = connect.device(req);
     // Requests are buffered in memory (up to 12 MiB), so the whole site is capped too.
-    if ([...active.values()].reduce((sum, value) => sum + value, 0) >= siteConcurrency) fail(429, 'AI_BUSY', '官方 AI 评分人数较多，请稍后再试');
-    if (!settings.key) fail(503, 'AI_DISABLED', '官方 AI 暂时不可用，请稍后再试，或在 AI 设置中改用自己的模型');
+    if ([...active.values()].reduce((sum, value) => sum + value, 0) >= siteConcurrency) fail(429, 'AI_BUSY', '免费 AI 评分人数较多，请稍后再试');
+    if (!settings.key) fail(503, 'AI_DISABLED', '免费 AI 暂时不可用，请稍后再试，或在 AI 设置中改用自己的模型');
     if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) fail(415, 'AI_REQUEST_UNSUPPORTED', '请使用 JSON 请求');
     let raw;
     try { raw = await readBody(req, 13 * MiB); } catch (error) { if (error.status === 413) fail(413, 'AI_REQUEST_TOO_LARGE', '请求超过 12 MiB 上限'); throw error; }
@@ -84,15 +87,10 @@ export function createOfficialAi({ db, settings: source, connect, json, readBody
     const request = validateCompletion(body);
     const userId = device.user_id;
     if ((active.get(userId) || 0) >= 2) fail(429, 'AI_BUSY', '同时进行的评分太多，请等前面的评分完成后再试');
-    const time = now(), day = shanghaiDay(time), resetAt = nextShanghaiMidnight(time);
-    if (usedTokens(time) >= settings.monthlyTokens) fail(503, 'AI_BUDGET_EXHAUSTED', '本月官方 AI 额度已用完，下月恢复，也可以在 AI 设置中改用自己的模型');
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      const calls = db.prepare('SELECT calls FROM official_ai_usage WHERE user_id=? AND day=?').get(userId, day)?.calls || 0;
-      if (calls >= settings.dailyLimit) fail(429, 'AI_DAILY_LIMIT', '今天的官方 AI 评分次数已用完，明天 0 点恢复，也可以在 AI 设置中改用自己的模型。', { resetAt });
-      db.prepare('INSERT INTO official_ai_usage (user_id,day,calls) VALUES (?,?,1) ON CONFLICT(user_id,day) DO UPDATE SET calls=calls+1').run(userId, day);
-      db.exec('COMMIT');
-    } catch (error) { db.exec('ROLLBACK'); throw error; }
+    const time = now(), day = shanghaiDay(time);
+    if (usedTokens(time) >= settings.monthlyTokens) fail(503, 'AI_BUDGET_EXHAUSTED', '本月免费 AI 服务的总量已用完，下月恢复，也可以在 AI 设置中改用自己的模型');
+    // Points are only spent after the model answers, so failures cost nothing.
+    if (points.balance(userId) < 1) fail(402, 'AI_POINTS_EXHAUSTED', '免费 AI 额度已用完，可以在设置 → 用户中心输入兑换码获取额度，也可以改用自己的模型。', { points: 0 });
     active.set(userId, (active.get(userId) || 0) + 1);
     let upstream;
     try {
@@ -106,18 +104,16 @@ export function createOfficialAi({ db, settings: source, connect, json, readBody
       upstream = JSON.parse(text);
       if (!Array.isArray(upstream?.choices)) throw new Error('upstream body');
     } catch {
-      // Network failures, timeouts and upstream errors do not use the user's quota.
-      refund(userId, day);
-      fail(502, 'AI_UPSTREAM_FAILED', '官方模型暂时没有响应，本次不计次数，请稍后重试');
+      // Network failures, timeouts and upstream errors do not spend points.
+      fail(502, 'AI_UPSTREAM_FAILED', '免费 AI 模型暂时没有响应，本次不扣额度，请稍后重试');
     } finally {
       const left = (active.get(userId) || 1) - 1; if (left) active.set(userId, left); else active.delete(userId);
     }
     const tokens = Number.isSafeInteger(upstream.usage?.total_tokens) && upstream.usage.total_tokens > 0 ? upstream.usage.total_tokens : 0;
-    if (tokens) {
-      db.prepare('UPDATE official_ai_usage SET tokens=tokens+? WHERE user_id=? AND day=?').run(tokens, userId, day);
-      db.prepare('INSERT INTO official_ai_budget VALUES (?,?) ON CONFLICT(period) DO UPDATE SET tokens=tokens+excluded.tokens').run(month(time), tokens);
-    }
-    json(res, 200, { id: 'qf-' + randomUUID(), object: 'chat.completion', model: 'quizforge-official', choices: upstream.choices, ...(upstream.usage ? { usage: upstream.usage } : {}) });
+    const spent = points.charge(userId, pointsFor(tokens, settings.tokensPerPoint));
+    db.prepare('INSERT INTO official_ai_usage (user_id,day,calls,tokens,points) VALUES (?,?,1,?,?) ON CONFLICT(user_id,day) DO UPDATE SET calls=calls+1,tokens=tokens+excluded.tokens,points=points+excluded.points').run(userId, day, tokens, spent);
+    if (tokens) db.prepare('INSERT INTO official_ai_budget VALUES (?,?) ON CONFLICT(period) DO UPDATE SET tokens=tokens+excluded.tokens').run(month(time), tokens);
+    json(res, 200, { id: 'qf-' + randomUUID(), object: 'chat.completion', model: 'quizforge-official', choices: upstream.choices, ...(upstream.usage ? { usage: upstream.usage } : {}), quizforge: { pointsSpent: spent, points: points.balance(userId) } });
     return true;
   }
   return { handle, usage };
