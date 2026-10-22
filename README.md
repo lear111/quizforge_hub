@@ -1,6 +1,10 @@
 # QuizForge 题库广场
 
-独立的题库下载与交流网站，不与 QuizForge 应用建立连接。上传者分享压缩包、简介和截图，访问者浏览、下载，登录后评论。2026-10-10 已部署到腾讯云首尔服务器：**https://quizforge.treenewbee.cloud/**。线上使用独立数据库，部署时没有迁移本机账号或测试数据。
+QuizForge 的云端产品，融合题库广场与在线练习，沿用 Hub 的账户和登录系统；本地产品为 QuizForge。题库广场：**https://quizforge.treenewbee.cloud/**；在线练习：**https://practice.treenewbee.cloud/**。公共题库支持下载文件、唤醒本地 QuizForge 导入，以及下载到云端练习。
+
+云端是基于固定 Web 运行时的邀请制试用版本，已接通浏览器直连 AI 评分、公共/私人题库导入、空间与每日下载额度。2026-10-20 新增正式 [管理后台](docs/ADMIN.md)，入口为 `/admin/`，使用已明确授予管理员权限的 Hub 账号登录。完整浏览器及设备验收仍待完成。历史开发状态见 [云端实现清单](docs/CLOUD_IMPLEMENTATION.md)；线上服务不会因本地源码变更而自动更新。
+
+刷题工作区按 Web 完整同步，主要差异保留在云端设置与账号存储适配。当前版本包含答题区、原生文件导入、单题编辑和统一题库列表；来源、旧数据合并及发布前检查见 [工作区同步说明](docs/WEB_WORKSPACE_SYNC.md)，线上版本与验证范围见 [部署记录](deploy/workspace-2026-10-21.md)。
 
 界面采用 QuizForge 原图标和浅紫配色，保留简洁的搜索、题库列表、上传和评论流程。源码仓库：https://github.com/lear111/quizforge_hub 。仓库不包含真实账号、数据库、附件或邮件密钥。
 
@@ -65,7 +69,9 @@ Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 
 | `DATA_DIR` | 项目下 `data` | 数据库、附件目录；不可放在公开静态目录中 |
 | `PUBLIC_ORIGIN` | 请求的本机 HTTP origin | 生产必须设置完整 HTTPS origin，例如 `https://hub.example.com`，不带末尾斜杠 |
 | `COOKIE_SECURE` | `0` | 本地 HTTP 为 0，生产 HTTPS 必须为 1 |
+| `INVITATION_REQUIRED` | `0` | 首次初始化邀请码验证开关；后续在管理后台的邀请码页面保存，重启保留管理员选择 |
 | `TRUST_PROXY` | `0` | 生产只有在 Node 端口不对外开放、反向代理覆盖 `X-Real-IP` 时才设为 1 |
+| `LOCAL_IMPORT_ENABLED` | `0` | 设为 1 开启公共 .qbank 本地唤醒与固定版本下载，独立于云端功能；当前设备需安装支持协议 v1 的 QuizForge 客户端 |
 | `MAX_ARCHIVE_MB` | `20` | 单个压缩包上限，MiB；调整时同步修改反向代理请求体限制 |
 | `USER_QUOTA_MB` | `500` | 单个上传者附件存储上限，MiB |
 | `TOTAL_QUOTA_MB` | `5000` | 所有题库附件存储总上限，MiB |
@@ -76,6 +82,18 @@ Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 
 默认采用 150 GB 附件预算，为用户的腾讯云首尔服务器 200 GB/月套餐预留空间。**这不是云账单硬限额**：它不包含 HTML/JS/CSS、响应头、TLS 开销、其他站点、服务器更新、外部备份或其他网络传输，也不能代替云侧 DDoS 防护和账单告警。服务器有其他用途时，应进一步降低网站预算。
 
 预算在发送前按整个文件大小保守预留，中途断开也不会退回，因此可能提前达到预算。图片浏览器缓存命中不会请求服务器，也不会重复预留。反向代理必须关闭附件缓存，否则缓存返回会绕过应用的流量计数。下载量指已接受的下载请求数，不是已完成下载人数。
+
+## 下载到本地 QuizForge
+
+`LOCAL_IMPORT_ENABLED=1` 后，已审核公开 `.qbank` 的详情页提供“下载题库文件”“下载并导入到本地”，云端功能开启时还有“下载并导入到云端”。本地入口说明为“导入当前设备上的 QuizForge，支持电脑和安卓手机、平板。”；云端入口说明为“导入账号的云端题库，需登录。”。
+
+电脑和 Android 共用 `quizforge://hub/import?v=1&pack=<id>&revision=<revision>`，由当前设备系统唤起已安装的客户端，无需选择平台。链接只包含协议版本、小写题库 UUID 和正整数 Hub revision。客户端从官方 Hub 获取清单和固定版本附件，校验后导入。Hub 清单请求不计下载；二进制下载沿用站点/IP 预算与保守预留，原生公共下载不消耗云端个人存储或个人下载额度。
+
+点击后网页只显示“已请求打开 QuizForge，请在系统提示中允许打开”，不判断安装状态或宣称下载、导入成功。普通文件下载始终保留且不增加登录要求；ZIP、RAR、7Z 和未公开附件不提供直接导入。Windows 下载入口使用官方 GitHub Releases，Android 显示“安装包待发布”，待正式发布地址和签名确定后再配置，不猜测 APK 地址。
+
+应用仅支持包内 `formatVersion: 3` 的单题库包和分组包，旧格式 1、2 需制作者升级，与题目年份或题库自身版本号无关。原生客户端继续检查拓展能力，不能为一键导入放宽兼容范围。
+
+协议、错误码见 [导入协议 v1](docs/superpowers/specs/2026-10-20-hub-local-import-design.md)，本次入口调整与联合验收边界见 [Android 一键导入交接](docs/HUB_ANDROID_IMPORT.md)。此开关独立于云端刷题功能，默认关闭；源码或自动测试通过不代表已部署、已开启入口或完成实际浏览器、系统唤起提示和真机验收。
 
 ## 公开上线前仍需完成
 
@@ -106,8 +124,16 @@ Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 
 
 邮件只提醒登录审核列表，不附加上传者填写的标题、正文或附件。新提交立即尝试提醒，15 分钟内合并，滚动 24 小时至多 24 次；发送失败也扣额度，30 分钟后重试。注册邮件仍沿用独立的 100 次上限，两者额度分别记录。模板尚未配置时上传仍正常，管理员页面显示配置未完成，待提醒任务保留。
 
-## 临时网盘下载提示页
+## 云端普通用户刷题入口
 
-设置私有环境变量 `DOWNLOAD_NOTICE_ENABLED=1`、`DOWNLOAD_NOTICE_URL`（HTTPS 夸克 / 百度网盘分享链接）、`DOWNLOAD_NOTICE_CODE` 后重启，网站根路径显示紫色提示页和网盘入口。首页只加载提示页样式 / 复制脚本，不自动加载题库、截图或验证码。原社区前端保留在 `/manage/`，审核入口为 `/manage/#reviews`；后端接口、账号权限和数据沿用现有逻辑。恢复时将 `DOWNLOAD_NOTICE_ENABLED=0` 并重启即可。它只是临时首页，不等同于关闭注册、上传或附件 API。
+普通用户刷题站现位于 [practice.treenewbee.cloud](https://practice.treenewbee.cloud/)，使用原 Hub 账号登录后直接进入基础题库。它使用独立数据目录；AI 评分通过用户浏览器直连其自填模型，API Key 留在本机。实现与验收边界见 `docs/CLOUD_IMPLEMENTATION.md`、`docs/CLOUD_QA_2026-10-19.md` 和 `docs/ADMIN.md`。
+
+## 题库广场入口
+
+网站根路径 `/` 直接显示题库广场；已有 `/manage/` 及 `/manage/#library` 链接继续有效，两者加载同一套页面和脚本。获取题库可使用 `https://quizforge.treenewbee.cloud/manage/#library`，原作答页面可保留。
+
+临时网盘提示页及其专用样式、复制脚本已移除。旧 `DOWNLOAD_NOTICE_ENABLED`、`DOWNLOAD_NOTICE_URL`、`DOWNLOAD_NOTICE_CODE` 不再读取，即使旧服务配置仍保留这些变量，也不会将首页切回提示页或因旧网盘地址阻止启动。入口调整不改变账号、登录、审核、数据目录和下载权限。
+
+Windows 客户端下载链接指向 [官方发布页](https://github.com/lear111/quizforge_web/releases)，不再依赖网站首页；Android 正式发布地址仍待确定。本轮是源码调整，未部署，不能据此判断线上已生效。
 
 切换前已将当前 SQLite 和全部附件一起备份至服务器私有备份目录，并下载到本机 `.codex/backups/quizforge-hub`（OneDrive 之外）。备份已实际解包，数据库完整性检查为 ok，2 个账号 / 2 份题库 / 4 个附件的大小与 SHA-256 校验通过。这是一次性备份，目前仍未配置定时异机备份。备份包含账号信息，不应上传到公开仓库或网盘分享目录。

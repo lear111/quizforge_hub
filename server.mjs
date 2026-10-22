@@ -10,7 +10,16 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { mailSettings, createMailProvider } from './mail.mjs';
 import { createEmailCodes, EmailCodeError } from './email-codes.mjs';
+import { createInvitations, createInvitationPolicy, InvitationError } from './invitations.mjs';
 import { createReviewNotifications } from './review-notifications.mjs';
+import { createLocalImport } from './local-import.mjs';
+import { CloudAccounts, CloudError } from './cloud/accounts.mjs';
+import { cloudRoute } from './cloud/routes.mjs';
+import { CloudLibrary } from './cloud/library.mjs';
+import { ActivityMetrics } from './admin/metrics.mjs';
+import { createHubAdmin } from './admin/hub.mjs';
+import { createAdminClient } from './admin/bridge.mjs';
+import { ReviewPackages } from './admin/review-packages.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
@@ -27,16 +36,6 @@ const text = (value, label, max, required = true) => {
 };
 
 export async function createApp(options = {}) {
-  const downloadNotice = options.downloadNotice ?? process.env.DOWNLOAD_NOTICE_ENABLED === '1';
-  let noticeUrl = '';
-  const noticeCode = options.downloadNoticeCode ?? process.env.DOWNLOAD_NOTICE_CODE ?? '';
-  if (downloadNotice) {
-    let target;
-    try { target = new URL(options.downloadNoticeUrl ?? process.env.DOWNLOAD_NOTICE_URL); } catch { throw new Error('DownloadNoticeURLInvalid'); }
-    if (target.protocol !== 'https:' || !['pan.quark.cn', 'pan.baidu.com'].includes(target.hostname) || target.username || target.password || target.port || !/^\/s\/[a-zA-Z0-9_-]+\/?$/.test(target.pathname)) throw new Error('DownloadNoticeURLInvalid');
-    if (typeof noticeCode !== 'string' || noticeCode.length > 32) throw new Error('DownloadNoticeCodeInvalid');
-    noticeUrl = target.href;
-  }
   const dataDir = path.resolve(options.dataDir || process.env.DATA_DIR || path.join(root, 'data'));
   const uploadDir = path.join(dataDir, 'files');
   await mkdir(uploadDir, { recursive: true });
@@ -66,13 +65,33 @@ export async function createApp(options = {}) {
   const provider = options.mailProvider || createMailProvider(mailSettings());
   const reviewNotifier = createReviewNotifications(db, options.reviewNotificationProvider || provider, reviewEmail, options.now);
   const emailCodes = createEmailCodes(db, provider, options.now);
+  const invitations = createInvitations(db, options.now);
+  const metrics = new ActivityMetrics(db, options.now);
+  const adminEnabled = options.adminEnabled ?? process.env.ADMIN_ENABLED === '1';
+  const invitationPolicy = createInvitationPolicy(db, options.invitationRequired ?? process.env.INVITATION_REQUIRED === '1');
+  const practiceOrigin = options.practiceOrigin ?? process.env.PRACTICE_ORIGIN ?? '';
+  if (practiceOrigin && (new URL(practiceOrigin).origin !== practiceOrigin || new URL(practiceOrigin).protocol !== 'https:')) throw new Error('Invalid practice origin');
   const secureCookies = options.secureCookies ?? process.env.COOKIE_SECURE === '1';
+  const cookieName = options.cookieName ?? 'qfh_session';
+  if (!/^[a-z][a-z0-9_]{0,40}$/.test(cookieName)) throw new Error('Invalid session cookie name');
+  const sessionPattern = new RegExp('(?:^|;\\s*)' + cookieName + '=([a-f0-9]{64})(?:;|$)');
   const publicOrigin = options.publicOrigin ?? process.env.PUBLIC_ORIGIN;
   const archiveLimit = Number(process.env.MAX_ARCHIVE_MB || 20) * MB;
   const monthlyBudget = Number(options.monthlyBudgetBytes ?? Number(process.env.MONTHLY_FILE_BUDGET_GB || 150) * 1e9);
+  const localImportEnabled = options.localImportEnabled ?? process.env.LOCAL_IMPORT_ENABLED === '1';
+  const cloudEnabled = options.cloudEnabled ?? process.env.CLOUD_ENABLED === '1';
+  const cloudAccounts = cloudEnabled ? new CloudAccounts(db, {
+    ...options.cloud,
+    timeZone: options.cloud?.timeZone ?? process.env.BILLING_TIMEZONE ?? 'Asia/Shanghai',
+    siteStorageBytes: options.cloud?.siteStorageBytes ?? Number(process.env.CLOUD_SITE_STORAGE_MB || 5120) * MB,
+    defaults: options.cloud?.defaults ?? { storageBytes: Number(process.env.CLOUD_STORAGE_MB || 256) * MB, dailyTrafficBytes: Number(process.env.CLOUD_DAILY_TRAFFIC_MB || 256) * MB, monthlyTrafficBytes: Number(process.env.CLOUD_MONTHLY_TRAFFIC_MB || 1024) * MB },
+  }) : null;
+  const runtimeDirectory = options.cloudRuntimeDir ?? process.env.CLOUD_RUNTIME_DIR;
+  const cloudLibrary = cloudAccounts && runtimeDirectory ? await CloudLibrary.create(db, cloudAccounts, dataDir, runtimeDirectory, { unifiedWorkspace: !!options.practiceHome }) : null;
+  const reviewPackages = cloudLibrary ? new ReviewPackages(cloudLibrary) : null;
   db.exec('CREATE TABLE IF NOT EXISTS traffic (period TEXT PRIMARY KEY, bytes INTEGER NOT NULL)');
   const month = () => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.BILLING_TIMEZONE || 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date());
-  const reserveTraffic = (req, size, reserve = true) => {
+  const reserveTraffic = (req, size, reserve = true, anonymous = false) => {
     const period = month();
     const ip = process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
     const day = `${iso().slice(0, 10)}:${hash(ip || '')}`;
@@ -82,9 +101,12 @@ export async function createApp(options = {}) {
       const daily = db.prepare('SELECT bytes FROM traffic WHERE period=?').get(day)?.bytes || 0;
       if (used + size > monthlyBudget) fail(429, '本月附件下载预算已用完，请下月再来或联系管理员');
       if (daily + size > Number(process.env.IP_DAILY_FILE_MB || 1000) * MB) fail(429, '今天的附件下载额度已用完，请明天再来');
+      const user = !anonymous && cloudAccounts && identity(req);
+      if (reserve && user) cloudAccounts.reserveTraffic(user.id, size, { transaction: false });
       if (reserve) for (const key of [period, day]) db.prepare('INSERT INTO traffic VALUES (?,?) ON CONFLICT(period) DO UPDATE SET bytes=bytes+excluded.bytes').run(key, size);
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
+    if (reserve) metrics.transfer(size);
   };
   const limits = new Map();
   let uploading = false;
@@ -95,9 +117,10 @@ export async function createApp(options = {}) {
   }, 60000);
   sweep.unref();
   const identity = req => {
-    const raw = /(?:^|;\s*)qfh_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie || '')?.[1];
+    if (options.identityProvider) return req.externalHubIdentity || null;
+    const raw = sessionPattern.exec(req.headers.cookie || '')?.[1];
     if (!raw) return null;
-    return db.prepare('SELECT u.id,u.name,u.email,u.admin FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?').get(hash(raw), Date.now()) || null;
+    return db.prepare('SELECT u.id,u.name,u.email,u.admin FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id=u.id)').get(hash(raw), Date.now()) || null;
   };
   const requireUser = req => identity(req) || fail(401, '请先登录');
   const requireAdmin = req => { const user = requireUser(req); if (!user.admin) fail(403, '仅管理员可审核题库'); return user; };
@@ -133,7 +156,7 @@ export async function createApp(options = {}) {
     try { const value = JSON.parse((await readBody(req, 24000)).toString('utf8')); if (!value || typeof value !== 'object' || Array.isArray(value)) fail(400, '请求内容应为对象'); return value; }
     catch (e) { if (e instanceof ApiError) throw e; fail(400, '请求内容格式错误'); }
   };
-  const cookie = (res, token, expires = 30 * 86400) => res.setHeader('Set-Cookie', `qfh_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${expires}${secureCookies ? '; Secure' : ''}`);
+  const cookie = (res, token, expires = 30 * 86400) => res.setHeader('Set-Cookie', `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${expires}${secureCookies ? '; Secure' : ''}`);
   const session = (res, userId) => {
     const token = randomBytes(32).toString('hex');
     db.prepare('INSERT INTO sessions VALUES (?,?,?)').run(hash(token), userId, Date.now() + 30 * 86400000);
@@ -230,6 +253,18 @@ export async function createApp(options = {}) {
       uploading = false;
     }
   };
+  const resolveCloudPack = (packId, revision) => {
+    if (typeof packId !== 'string' || !/^[a-f0-9-]{36}$/.test(packId) || !Number.isSafeInteger(revision) || revision < 1) fail(400, '题库版本无效');
+    const row = packRow(packId);
+    if (row.status !== 'approved') fail(404, '题库不存在或尚未公开');
+    if (row.revision !== revision) fail(409, '公共题库已更新，请刷新后重新下载到云端');
+    const file = db.prepare("SELECT * FROM files WHERE pack_id=? AND kind='archive'").get(packId) || fail(404, '题库文件不存在');
+    if (!file.name.toLowerCase().endsWith('.qbank')) fail(422, '此附件不是 .qbank 文件，暂不能下载到云端');
+    return { file: path.join(uploadDir, file.id), filename: file.name, source: { kind: 'hub', packId, revision, sha256: file.sha256, title: row.title } };
+  };
+  const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack: options.resolveCloudPack || resolveCloudPack, reserveTraffic });
+  const handleLocalImport = createLocalImport({ db, uploadDir, enabled: localImportEnabled, throttle, reserveTraffic, json, openFile: options.localImportOpenFile });
+  const handleAdmin = createHubAdmin({ db, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
@@ -238,15 +273,77 @@ export async function createApp(options = {}) {
     try {
       const url = new URL(req.url, 'http://localhost');
       const pathname = decodeURIComponent(url.pathname);
+      if (options.beforeRequest && await options.beforeRequest(req, res, url)) return;
+      if (options.identityProvider) {
+        const user = await options.identityProvider(req);
+        if (user) {
+          if (!/^[a-f0-9-]{36}$/.test(user.id) || typeof user.email !== 'string' || typeof user.name !== 'string' || ![0, 1].includes(user.admin)) fail(503, '登录信息无效');
+          db.prepare("INSERT INTO users(id,email,name,password,admin,created) VALUES (?,?,?,'!external-auth',?,?) ON CONFLICT(id) DO UPDATE SET email=excluded.email,name=excluded.name,admin=excluded.admin").run(user.id, user.email, user.name, user.admin, iso());
+          req.externalHubIdentity = user;
+        }
+        if (pathname.startsWith('/api/auth/')) fail(403, '请通过 Hub 统一登录');
+      }
+      // AI configuration runs without the Hub's third-party registration script.
+      // Only this document may directly connect to user-selected HTTPS models.
+      if (cloudEnabled && pathname.startsWith('/cloud/')) res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; frame-src 'none'; style-src 'self'; img-src 'self'; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+      if (pathname.startsWith('/admin/')) res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; frame-src 'none'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
       if (!['GET', 'HEAD'].includes(req.method)) {
         const allowed = publicOrigin || `http://${req.headers.host}`;
         if (req.headers.origin !== allowed) fail(403, '请求来源不受信任');
       }
+      if (pathname === '/internal/activity' && req.method === 'POST') {
+        if (req.headers.host !== `127.0.0.1:${server.address().port}` || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) fail(403, '仅允许服务内部访问');
+        const user = requireUser(req); const input = await bodyJson(req);
+        if (!['visit', 'practice', 'heartbeat'].includes(input.kind)) fail(400, '活动类型无效');
+        throttle(req, 'activity-service', 60, user.id); metrics.record(user.id, input.kind); json(res, 200, { ok: true }); return;
+      }
+      if (pathname === '/api/cloud/activity' && req.method === 'POST' && options.reportActivity) {
+        const user = requireUser(req); throttle(req, 'activity-relay', 40, user.id); const input = await bodyJson(req);
+        if (!['visit', 'practice', 'heartbeat'].includes(input.kind)) fail(400, '活动类型无效');
+        await options.reportActivity(req, input.kind); json(res, 200, { ok: true }); return;
+      }
+      if (options.practiceHome && ['/', '/cloud/'].includes(pathname) && req.method === 'GET') {
+        const user = identity(req);
+        if (!user) { res.writeHead(303, { Location: '/auth/hub', 'Cache-Control': 'no-store' }).end(); return; }
+        if (!cloudLibrary) fail(503, '云端运行时尚未配置');
+        const item = await cloudLibrary.ensureDemo(user.id);
+        res.writeHead(303, { Location: `/cloud/practice/${item.id}/`, 'Cache-Control': 'no-store' }).end(); return;
+      }
+      const practiceApi = /^\/api\/cloud\/practice\/([a-f0-9-]{36})(\/api\/.*)$/.exec(pathname);
+      const practicePage = /^\/cloud\/practice\/([a-f0-9-]{36})\/(.*)$/.exec(pathname);
+      if (practiceApi || practicePage) {
+        if (options.practiceHome && practicePage && req.method === 'GET' && !identity(req)) {
+          res.writeHead(303, { Location: '/auth/hub', 'Cache-Control': 'no-store' }).end(); return;
+        }
+        const user = requireUser(req);
+        if (!cloudLibrary) fail(503, '云端练习运行时尚未配置');
+        throttle(req, 'cloud-practice', 240, user.id);
+        if (practiceApi?.[2] === '/api/library/import' && req.method === 'POST') throttle(req, 'cloud-import', 6, user.id);
+        if (options.practiceHome && practicePage && practicePage[2] === '') {
+          cloudLibrary.owned(user.id, practicePage[1]);
+          const workspace = await cloudLibrary.ensureDemo(user.id);
+          if (workspace.id !== practicePage[1]) { res.writeHead(303, { Location: `/cloud/practice/${workspace.id}/` + url.search, 'Cache-Control': 'no-store' }).end(); return; }
+        }
+        let result;
+        if (practiceApi) result = await cloudLibrary.practice.api(user.id, practiceApi[1], practiceApi[2] + url.search, req);
+        else {
+          if (req.method !== 'GET') fail(405, '页面仅支持 GET');
+          result = cloudLibrary.practice.asset(user.id, practicePage[1], practicePage[2], { ordinary: !!options.practiceHome });
+          res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
+        }
+        // Reading, saving and grading are normal use, never file downloads.
+        if (practiceApi && ['POST', 'PUT'].includes(req.method) && result.status < 400 && /\/(?:answer|answers|submit|exam|exams|actions)(?:\/|$)/.test(practiceApi[2])) options.reportActivity?.(req, 'practice')?.catch(() => {});
+        res.writeHead(result.status, { 'Content-Type': result.type, 'Content-Length': result.bytes.length, 'Cache-Control': 'no-store' }); res.end(result.bytes); return;
+      }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
-      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, turnstileSiteKey: emailCodes.siteKey }); return; }
+      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, invitationRequired: invitationPolicy.required(), turnstileSiteKey: emailCodes.siteKey, cloudEnabled, practiceOrigin, adminEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' } }); return; }
+      if (await handleAdmin(req, res, url)) return;
+      if (await handleLocalImport(req, res, url)) return;
+      if (await handleCloud(req, res, url)) return;
       if (pathname === '/api/auth/email-code' && req.method === 'POST') {
         throttle(req, 'email-code', 6);
         const input = await bodyJson(req);
+        if (invitationPolicy.required()) invitations.check(input.invitationCode);
         const email = text(input.email, '邮箱', 180).toLowerCase();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, '邮箱格式不正确');
         const ip = process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
@@ -264,22 +361,28 @@ export async function createApp(options = {}) {
         if (password.length < 10) fail(400, '密码至少需要 10 个字符');
         if (pathname.endsWith('register')) {
           if (!emailCodes.ready) fail(503, '注册邮件暂未开放，请稍后再来');
+          if (invitationPolicy.required()) invitations.check(input.invitationCode);
           const name = text(input.name, '昵称', 30);
           const salt = randomBytes(16).toString('hex');
           const digest = (await derive(password, salt, 64)).toString('hex');
           const id = randomUUID();
-          try { emailCodes.consume(email, input.code, () => db.prepare('INSERT INTO users (id,email,name,password,created) VALUES (?,?,?,?,?)').run(id, email, name, `${salt}:${digest}`, iso())); }
+          try { emailCodes.consume(email, input.code, () => {
+            db.prepare('INSERT INTO users (id,email,name,password,created) VALUES (?,?,?,?,?)').run(id, email, name, `${salt}:${digest}`, iso());
+            // Re-read inside the final account transaction: an administrator
+            // can enable the gate while password hashing is still in flight.
+            if (invitationPolicy.required()) invitations.consume(input.invitationCode, id);
+          }); }
           catch (e) { if (e.message.includes('UNIQUE')) fail(409, '该邮箱已注册'); throw e; }
           session(res, id); json(res, 201, { user: { id, email, name, admin: 0 } }); return;
         }
         const user = db.prepare('SELECT * FROM users WHERE email=?').get(email);
         const [salt, digest] = (user?.password || `${'0'.repeat(32)}:${'0'.repeat(128)}`).split(':');
         const candidate = await derive(password, salt, 64);
-        if (!user || !timingSafeEqual(candidate, Buffer.from(digest, 'hex'))) fail(401, '邮箱或密码不正确');
+        if (!user || !timingSafeEqual(candidate, Buffer.from(digest, 'hex')) || db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(user.id)) fail(401, '邮箱或密码不正确，或账号已停用');
         session(res, user.id); json(res, 200, { user: { id: user.id, email: user.email, name: user.name, admin: user.admin } }); return;
       }
       if (pathname === '/api/auth/logout' && req.method === 'POST') {
-        const raw = /qfh_session=([a-f0-9]{64})/.exec(req.headers.cookie || '')?.[1];
+        const raw = sessionPattern.exec(req.headers.cookie || '')?.[1];
         if (raw) db.prepare('DELETE FROM sessions WHERE token=?').run(hash(raw));
         cookie(res, '', 0); json(res, 200, { ok: true }); return;
       }
@@ -302,6 +405,7 @@ export async function createApp(options = {}) {
         const [, id, action] = match; const row = packRow(id);
         if (action === 'review' && req.method === 'POST') {
           const admin = requireAdmin(req); const input = await bodyJson(req);
+          if (adminEnabled) fail(409, '请前往管理后台执行包含拓展的整包审核');
           if (!['approved', 'rejected'].includes(input.decision)) fail(400, '请选择通过或驳回');
           if (!Number.isSafeInteger(input.revision) || input.revision < 1) fail(400, '审核版本无效');
           const note = text(input.note ?? '', '审核说明', 1000, input.decision === 'rejected');
@@ -385,13 +489,28 @@ export async function createApp(options = {}) {
         await pipeline(createReadStream(path.join(uploadDir, file.id)), res); return;
       }
       if (['GET', 'HEAD'].includes(req.method) && !pathname.startsWith('/api/')) {
-        const assets = { '/app.js': ['app.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/notice.css': ['notice.css', 'text/css'], '/notice.js': ['notice.js', 'text/javascript'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
-        const entry = assets[pathname] || (pathname === '/' ? [downloadNotice ? 'notice.html' : 'index.html', 'text/html'] : pathname === '/manage/' ? ['index.html', 'text/html'] : null);
+        const assets = { '/app.js': ['app.js', 'text/javascript'], '/local-import.js': ['local-import.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
+        assets['/activity.js'] = ['activity.js', 'text/javascript'];
+        if (adminEnabled) {
+          if (pathname === '/admin/') { if (!identity(req)) { res.writeHead(303, { Location: '/manage/#admin', 'Cache-Control': 'no-store' }).end(); return; } requireAdmin(req); }
+          assets['/admin/'] = ['admin/index.html', 'text/html']; assets['/admin/app.js'] = ['admin/app.js', 'text/javascript']; assets['/admin/admin.css'] = ['admin/admin.css', 'text/css'];
+        }
+        if (cloudEnabled) {
+          assets['/cloud/activity.js'] = ['activity.js', 'text/javascript'];
+          assets['/cloud/library.js'] = ['cloud/library.js', 'text/javascript'];
+          assets['/cloud/import'] = ['cloud/import.html', 'text/html'];
+          assets['/cloud/import.js'] = ['cloud/import.js', 'text/javascript'];
+          assets['/cloud/import.css'] = ['cloud/import.css', 'text/css'];
+          for (const name of ['app.js', 'vault.js', 'ai-client.js', 'cloud.css', 'practice.css', 'experience.js', 'experience.css', 'embedded.css']) assets['/cloud/' + name] = ['cloud/' + name, name.endsWith('.css') ? 'text/css' : 'text/javascript'];
+          for (const route of ['/cloud/', '/cloud/ai', '/cloud/admin']) assets[route] = ['cloud/index.html', 'text/html'];
+        }
+        const entry = assets[pathname] || (['/', '/manage/'].includes(pathname) ? ['index.html', 'text/html'] : null);
         if (entry) {
           let data = await readFile(path.join(root, 'public', entry[0]));
-          if (entry[0] === 'notice.html') {
-            const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
-            data = Buffer.from(data.toString('utf8').replaceAll('{{DOWNLOAD_URL}}', escape(noticeUrl)).replaceAll('{{DOWNLOAD_CODE}}', escape(noticeCode)).replaceAll('{{PROVIDER}}', new URL(noticeUrl).hostname === 'pan.quark.cn' ? '夸克网盘' : '百度网盘'));
+          if (options.practiceHome && pathname === '/cloud/ai' && url.searchParams.get('embedded') === '1') {
+            data = Buffer.from(data.toString('utf8').replace('</head>', '<link rel="stylesheet" href="/cloud/embedded.css"></head>'));
+            res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+            res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' https:; frame-ancestors 'self'; base-uri 'none'; object-src 'none'; form-action 'self'");
           }
           res.writeHead(200, { 'Content-Type': entry[1] === 'image/png' ? entry[1] : `${entry[1]}; charset=utf-8`, 'Cache-Control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : data); return;
         }
@@ -399,14 +518,16 @@ export async function createApp(options = {}) {
       fail(404, '页面不存在');
     } catch (e) {
       if (res.headersSent) { res.destroy(); return; }
-      const status = e instanceof ApiError || e instanceof EmailCodeError ? e.status : e.code === 'ENOENT' ? 404 : 500;
+      const status = e instanceof ApiError || e instanceof EmailCodeError || e instanceof InvitationError || e instanceof CloudError ? e.status : e.code === 'ENOENT' ? 404 : 500;
       if (status === 500) console.error('Request failed:', e.name, e.code || 'internal');
-      json(res, status, { error: status === 500 ? '服务器暂时无法处理，请稍后重试' : status === 404 && !(e instanceof ApiError) ? '文件不存在' : e.message });
+      const message = status === 500 ? '服务器暂时无法处理，请稍后重试' : status === 404 && !(e instanceof ApiError) ? '文件不存在' : e.message;
+      const scopedPractice = /^\/api\/cloud\/practice\/[a-f0-9-]{36}\/api\//.test(req.url.split('?')[0]);
+      json(res, status, { error: scopedPractice ? { code: e.code || 'CLOUD_REQUEST_REJECTED', message } : message });
     }
   });
   server.requestTimeout = 45000; server.headersTimeout = 10000;
-  server.on('close', () => { clearInterval(sweep); reviewNotifier.stop(); db.close(); });
-  return { server, dataDir };
+  server.on('close', () => { clearInterval(sweep); reviewNotifier.stop(); cloudLibrary?.close(); db.close(); });
+  return { server, dataDir, db, cloudLibrary, cloudAccounts, metrics, reviewPackages };
 }
 
 if (import.meta.main) {

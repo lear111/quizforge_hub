@@ -10,6 +10,8 @@
 
 #auth-dialog .email-code-row input{width:0;flex:1 1 0}#auth-dialog .email-code-row button{width:auto;flex:0 0 auto;padding:10px 12px;min-width:110px}
 
+.download-panel>.button{margin-top:9px}.download-panel>.file-facts+.button{margin-top:0}.header-actions .practice-entry{white-space:nowrap}
+@media(max-width:900px){.header{gap:20px}.header nav{gap:15px}.header-actions{gap:10px}.header-actions .practice-entry{padding:9px 12px}}
 /* QuizForge app identity: light surfaces and restrained purple accents. */
 .header{background:var(--white)}
 .brand{font-size:19px;font-weight:700;letter-spacing:-.4px}
@@ -28,3 +30,5 @@
 
 .review-status{display:inline-block;padding:3px 9px;margin-bottom:10px;border-radius:6px;font-size:12px;font-weight:600;background:var(--accent-soft);color:var(--accent)}.review-status.rejected{color:#a24137;background:#fff0ee}.review-status.approved{color:#594888;background:#f1eef9}.review-notice{border:1px solid var(--line);background:var(--accent-soft);padding:16px 20px;border-radius:12px;margin-bottom:24px}.review-notice p{margin:6px 0;overflow-wrap:anywhere}.review-settings{display:flex;flex-direction:column;gap:5px;background:white;border:1px solid var(--line);border-radius:12px;padding:16px 20px;margin:20px 0;overflow-wrap:anywhere}.review-settings .text-button{align-self:flex-start;white-space:normal}.review-tabs,.review-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:20px 0}.review-panel{background:#fdfbff}.review-panel .review-actions{margin-bottom:0}
 @media(max-width:420px){.header{height:auto;min-height:90px;flex-wrap:wrap;gap:10px;padding-top:14px;padding-bottom:14px}.header-actions{width:100%;margin-left:0;justify-content:flex-end;gap:10px}.header-actions .button{padding:8px 12px}}
+
+.download-option{margin-top:12px}.download-option .download-note{margin:6px 0 0}.download-option [role=status]:empty{display:none}.download-installers{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:12px}.download-installers .download-note{margin:0}

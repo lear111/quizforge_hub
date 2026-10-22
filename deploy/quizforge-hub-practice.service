@@ -1,0 +1,28 @@
+[Unit]
+Description=QuizForge Hub ordinary-user cloud practice
+After=network.target quizforge-hub.service
+
+[Service]
+Type=simple
+User=quizforge-practice
+Group=quizforge-practice
+WorkingDirectory=/opt/quizforge-hub-practice/current
+ExecStart=/opt/quizforge-node/bin/node /opt/quizforge-hub-practice/current/scripts/cloud-practice-site.mjs
+Environment=DATA_DIR=/var/lib/quizforge-hub-practice
+Environment=CLOUD_RUNTIME_DIR=/opt/quizforge-hub-practice/current/.runtime/web-current
+Environment=NODE_ENV=production
+Environment=TRUST_PROXY=1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/quizforge-hub-practice
+UMask=0077
+MemoryHigh=512M
+MemoryMax=768M
+TasksMax=96
+
+[Install]
+WantedBy=multi-user.target
