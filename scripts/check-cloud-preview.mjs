@@ -1,0 +1,51 @@
+// Smoke checks for the explicitly isolated preview proxy only. Never target the
+// production site: this creates synthetic content in the preview database.
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+
+const origin = new URL(process.argv[2] || 'http://localhost:4321');
+if (origin.protocol !== 'http:' || !['localhost', '127.0.0.1'].includes(origin.hostname)) throw new Error('Loopback preview origin required');
+const base = origin.origin;
+const probe = await fetch(base + '/api/config');
+if (probe.headers.get('x-quizforge-preview') !== 'isolated-synthetic-data') throw new Error('Not the isolated preview proxy');
+const req = async (route, { role = 'admin', body, method = body ? 'POST' : 'GET', headers = {} } = {}) => {
+  const response = await fetch(base + route, { method, headers: { Origin: base, Cookie: `qfh_preview_role=${role}`, ...(body && !(body instanceof FormData) && !Buffer.isBuffer(body) ? { 'Content-Type': 'application/json' } : {}), ...headers }, ...(body ? { body: body instanceof FormData || Buffer.isBuffer(body) ? body : JSON.stringify(body) } : {}) });
+  const type = response.headers.get('content-type') || '';
+  const result = type.includes('json') ? await response.json() : await response.text();
+  return { response, result };
+};
+const identity = await req('/api/me'); assert.equal(identity.result.user.admin, 1);
+const reader = await req('/api/me', { role: 'reader' }); assert.equal(reader.result.user.admin, 0);
+assert.equal((await req('/api/cloud/admin/users', { role: 'reader' })).response.status, 403);
+const runtime = process.env.CLOUD_RUNTIME_DIR || fileURLToPath(new URL('../.runtime/web-current', import.meta.url));
+const bytes = fs.readFileSync(path.join(runtime, 'basic-demo.qbank'));
+const form = new FormData();
+for (const [key, value] of Object.entries({ title: '云端验收 · 四种基础题型', summary: '隔离环境合成示例', description: '测试专用题库，验证公共题库直接进入云端并提交作答。', version: '1.0', tags: '测试', rights: 'yes' })) form.set(key, value);
+form.set('archive', new Blob([bytes]), '云端验收示例.qbank');
+const uploaded = await req('/api/packs', { body: form }); assert.equal(uploaded.response.status, 201, JSON.stringify(uploaded.result));
+const pack = uploaded.result.pack;
+assert.equal((await req(`/api/packs/${pack.id}/review`, { body: { decision: 'approved', revision: pack.revision } })).response.status, 200);
+const before = (await req('/api/cloud/me', { role: 'reader' })).result;
+const added = await req('/api/cloud/library/from-hub', { role: 'reader', body: { packId: pack.id, revision: pack.revision } });
+assert.equal(added.response.status, 201, JSON.stringify(added.result));
+const item = added.result.item; assert.equal(item.practiceReady, true);
+const after = (await req('/api/cloud/me', { role: 'reader' })).result;
+assert.equal(after.usage.monthlyTrafficBytes, before.usage.monthlyTrafficBytes, 'server-side add must not charge public egress');
+assert.ok(after.usage.storageBytes > before.usage.storageBytes);
+assert.equal((await req('/api/cloud/library/from-hub', { role: 'reader', body: { packId: pack.id, revision: pack.revision } })).response.status, 409);
+assert.equal((await req(`/cloud/practice/${item.id}/`, { role: 'admin' })).response.status, 404);
+const page = await req(`/cloud/practice/${item.id}/`, { role: 'reader' }); assert.equal(page.response.status, 200); assert.match(page.result, /我的云端题库/);
+const api = `/api/cloud/practice/${item.id}/api`;
+const index = await req(api + '/library/index', { role: 'reader' }); assert.equal(index.response.status, 200, JSON.stringify(index.result));
+const bank = index.result.banks[0], question = api + `/collections/bank/${bank.id}/questions/single-sample-text`;
+const current = await req(question, { role: 'reader' }); assert.equal(current.response.status, 200, JSON.stringify(current.result));
+const raw = JSON.parse(fs.readFileSync(path.join(runtime, 'basic-content/question-banks/基础题型/基础题型展示/bank.json'), 'utf8'));
+const saved = await req(question + '/actions', { role: 'reader', body: { requestId: 'preview-http-submit-' + item.id, revision: current.result.state.revision, contentVersion: current.result.stamp.contentVersion, action: 'submit', data: { answer: { selectedOptionId: raw.questions[0].data.correctOptionId } } } });
+assert.equal(saved.response.status, 200, JSON.stringify(saved.result)); assert.equal(saved.result.state.status, 'submitted');
+const read = await req(question, { role: 'reader' }); assert.equal(read.result.state.status, 'submitted');
+assert.equal((await req(api + '/settings/ai/credential', { role: 'reader' })).response.status, 403);
+const exported = await fetch(base + `/api/cloud/library/${item.id}/export`, { headers: { Cookie: 'qfh_preview_role=reader' } });
+assert.equal(exported.status, 200); assert.equal(Buffer.from(await exported.arrayBuffer()).subarray(0, 2).toString(), 'PK');
+console.log(JSON.stringify({ ok: true, checks: ['shared-login', 'admin-isolation', 'public-to-cloud-without-egress-charge', 'duplicate-copy-check', 'private-owner-isolation', 'practice-assets', 'read-question', 'submit-score-save', 'read-back', 'no-server-key-api', 'qbank-export'], importId: item.id, bankId: bank.id, questionPath: question, preview: `${base}/cloud/` }));

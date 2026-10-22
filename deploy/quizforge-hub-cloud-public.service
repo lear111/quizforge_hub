@@ -1,0 +1,25 @@
+[Unit]
+Description=QuizForge Hub admin-protected public cloud preview gateway
+After=network.target quizforge-hub.service quizforge-hub-cloud-test.service
+Requires=quizforge-hub-cloud-test.service
+
+[Service]
+Type=simple
+User=quizforge-cloud-test
+Group=quizforge-cloud-test
+WorkingDirectory=/opt/quizforge-hub-cloud-public/current
+ExecStart=/opt/quizforge-node/bin/node /opt/quizforge-hub-cloud-public/current/scripts/cloud-public-preview.mjs
+Environment=NODE_ENV=production
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+UMask=0077
+MemoryHigh=64M
+MemoryMax=96M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target
