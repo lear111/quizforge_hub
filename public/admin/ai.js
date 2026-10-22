@@ -197,12 +197,17 @@ export function createAiPages({ root, main, api, toast }) {
   // 用户管理 → 调整余额: a new balance (not an increment) and a required reason, with recent changes.
   async function adjustBalance(user, done) {
     const { balance, history } = await api(`/users/${user.id}/ai-balance`);
-    const line = entry => `<li><span>${esc(entry.kind === 'grading' ? `${entry.day} 评分 ${entry.calls} 次` : `${shortTime(entry.at)} ${entry.kind === 'redeem' ? '兑换码 ' + entry.note : '管理员调整：' + entry.note}`)}</span><span>${entry.delta >= 0 ? '+' : '−'}${yuan(Math.abs(entry.delta), entry.kind === 'grading' ? 4 : 2)}</span></li>`;
+    // Redeems and admin changes are listed one by one; grading spend is recorded per day, so it is a separate daily total.
+    const amount = delta => `${delta >= 0 ? '+' : '−'}${exact(Math.abs(delta))}`;
+    const changes = history.filter(entry => entry.kind !== 'grading'), days = history.filter(entry => entry.kind === 'grading');
+    const change = entry => `<li><span>${esc(shortTime(entry.at))} ${esc(entry.kind === 'redeem' ? '兑换码 ' + entry.note : '管理员调整：' + entry.note)}</span><span>${amount(entry.delta)}</span></li>`;
+    const dayTotal = entry => `<li><span>${esc(entry.day)} 当天合计 · 评分 ${entry.calls} 次</span><span>${amount(entry.delta)}</span></li>`;
     open(`调整 ${user.name} 的 AI 余额`, `<p class="qa-muted">当前余额 ${exact(balance)}</p><div class="qa-fields">
       ${field('新余额（元）', `<input name="balance" type="number" required min="0" max="1000000" step="0.0001" value="${plain(balance)}">`, true)}
       ${field('原因（记入操作日志）', '<textarea name="reason" required maxlength="200" rows="2"></textarea>', true)}</div>
       <p class="qa-muted">填写的是新的余额，不在原来基础上累加。</p>
-      ${history.length ? `<h3 class="qa-history-title">最近的余额变动</h3><ul class="qa-history">${history.map(line).join('')}</ul>` : '<p class="qa-muted">还没有余额变动。</p>'}`, {
+      ${changes.length ? `<h3 class="qa-history-title">余额变动</h3><ul class="qa-history">${changes.map(change).join('')}</ul>` : '<p class="qa-muted">还没有兑换或调整记录。</p>'}
+      ${days.length ? `<h3 class="qa-history-title">评分扣费（按天合计）</h3><ul class="qa-history">${days.map(dayTotal).join('')}</ul>` : ''}`, {
       async submit(data) { const result = await api(`/users/${user.id}/ai-balance`, { method: 'PUT', body: { balance: toUnits(data.get('balance')), reason: String(data.get('reason') || '').trim() } }); toast(`${user.name} 的 AI 余额已改为 ${exact(result.balance)}。`); },
       after: done,
     });
