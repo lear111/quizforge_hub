@@ -21,7 +21,8 @@ import { createHubAdmin } from './admin/hub.mjs';
 import { createAdminClient } from './admin/bridge.mjs';
 import { ReviewPackages } from './admin/review-packages.mjs';
 import { createConnect, ConnectError } from './connect.mjs';
-import { createOfficialAi, officialAiSettings } from './official-ai.mjs';
+import { createOfficialAi, officialAiSettings, shanghaiDay } from './official-ai.mjs';
+import { createOfficialAiConfig, masterKey } from './official-ai-config.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
@@ -266,10 +267,19 @@ export async function createApp(options = {}) {
   };
   const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack: options.resolveCloudPack || resolveCloudPack, reserveTraffic });
   const handleLocalImport = createLocalImport({ db, uploadDir, enabled: localImportEnabled, throttle, reserveTraffic, json, openFile: options.localImportOpenFile });
-  const handleAdmin = createHubAdmin({ db, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
+  // Official AI settings: server file values are the defaults; the admin backend can
+  // override them and store the upstream key encrypted with OFFICIAL_AI_MASTER_KEY.
+  const aiConfig = createOfficialAiConfig({ db, base: options.officialAi ?? officialAiSettings(), master: masterKey(options.officialAiMasterKey ?? process.env.OFFICIAL_AI_MASTER_KEY), now: options.now });
+  const verifyPassword = async (userId, password) => {
+    const row = db.prepare('SELECT password FROM users WHERE id=?').get(userId);
+    if (typeof password !== 'string' || password.length > 128 || !row || !row.password.includes(':')) return false;
+    const [salt, digest] = row.password.split(':'), candidate = await derive(password, salt, 64), expected = Buffer.from(digest, 'hex');
+    return expected.length === candidate.length && timingSafeEqual(candidate, expected);
+  };
+  const handleAdmin = createHubAdmin({ db, officialAi: aiConfig, verifyPassword, shanghaiDay, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
   // Hub account connection and the official AI gateway (docs/HUB_CONNECT_AI.md).
-  const aiSettings = options.officialAi ?? officialAiSettings();
-  const connect = createConnect({ db, enabled: aiSettings.enabled, identity, throttle, json, bodyJson, dailyLimit: aiSettings.dailyLimit, modelLabel: '通义千问 ' + aiSettings.model, now: options.now });
+  const aiSettings = () => aiConfig.current();
+  const connect = createConnect({ db, enabled: () => aiSettings().enabled, identity, throttle, json, bodyJson, dailyLimit: () => aiSettings().dailyLimit, modelLabel: () => '通义千问 ' + aiSettings().model, now: options.now });
   const officialAi = createOfficialAi({ db, settings: aiSettings, connect, json, readBody, now: options.now, fetchImpl: options.officialAiFetch });
   // These device endpoints authenticate only with a Bearer device token and never
   // read cookies, so native clients may call them without a browser Origin.
@@ -345,7 +355,7 @@ export async function createApp(options = {}) {
         res.writeHead(result.status, { 'Content-Type': result.type, 'Content-Length': result.bytes.length, 'Cache-Control': 'no-store' }); res.end(result.bytes); return;
       }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
-      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, invitationRequired: invitationPolicy.required(), turnstileSiteKey: emailCodes.siteKey, cloudEnabled, practiceOrigin, adminEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' }, officialAi: { enabled: aiSettings.enabled, protocolVersion: 1 } }); return; }
+      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, invitationRequired: invitationPolicy.required(), turnstileSiteKey: emailCodes.siteKey, cloudEnabled, practiceOrigin, adminEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' }, officialAi: { enabled: aiSettings().enabled, protocolVersion: 1 } }); return; }
       if (await connect.handle(req, res, url)) return;
       if (await officialAi.handle(req, res, url)) return;
       if (await handleAdmin(req, res, url)) return;
@@ -502,7 +512,7 @@ export async function createApp(options = {}) {
       if (['GET', 'HEAD'].includes(req.method) && !pathname.startsWith('/api/')) {
         const assets = { '/app.js': ['app.js', 'text/javascript'], '/local-import.js': ['local-import.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
         assets['/activity.js'] = ['activity.js', 'text/javascript'];
-        if (aiSettings.enabled) assets['/connect.js'] = ['connect.js', 'text/javascript'];
+        assets['/connect.js'] = ['connect.js', 'text/javascript'];
         if (adminEnabled) {
           if (pathname === '/admin/') { if (!identity(req)) { res.writeHead(303, { Location: '/manage/#admin', 'Cache-Control': 'no-store' }).end(); return; } requireAdmin(req); }
           assets['/admin/'] = ['admin/index.html', 'text/html']; assets['/admin/app.js'] = ['admin/app.js', 'text/javascript']; assets['/admin/admin.css'] = ['admin/admin.css', 'text/css'];

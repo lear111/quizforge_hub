@@ -4,7 +4,7 @@ import path from 'node:path';
 import { CloudError } from '../cloud/accounts.mjs';
 import { bytes, filename, jsonBody, reason, send, uuid } from './common.mjs';
 
-export function createHubAdmin({ db, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, cloud, token, uploadDir, enabled }) {
+export function createHubAdmin({ db, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, cloud, token, uploadDir, enabled, officialAi, verifyPassword, shanghaiDay }) {
   db.exec(`CREATE TABLE IF NOT EXISTS pack_admin_reviews(pack_id TEXT NOT NULL,revision INTEGER NOT NULL,sha256 TEXT NOT NULL,submission TEXT NOT NULL,PRIMARY KEY(pack_id,revision,sha256));
     CREATE TABLE IF NOT EXISTS pack_cloud_approvals(pack_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,sha256 TEXT NOT NULL,digests TEXT NOT NULL,status TEXT NOT NULL,actor_id TEXT NOT NULL,created INTEGER NOT NULL);`);
   const audit = (actor, action, target, detail) => db.prepare('INSERT INTO admin_audit VALUES (?,?,?,?,?,?)').run(randomUUID(), actor, target, action, JSON.stringify(detail), Date.now());
@@ -39,6 +39,22 @@ export function createHubAdmin({ db, invitations, invitationPolicy, metrics, req
     } else if (route === '/overview' && req.method === 'GET') {
       const local = metrics.overview(Number(url.searchParams.get('days'))), remote = await call(req, '/summary');
       value = { ...local, transfers: { requests: local.transfers.requests + remote.transfers.requests, bytes: local.transfers.bytes + remote.transfers.bytes }, cloud: remote };
+    }
+    else if (route === '/official-ai' && ['GET', 'PUT'].includes(req.method) && officialAi) {
+      if (req.method === 'PUT') {
+        const { password, ...input } = await jsonBody(req);
+        // Changing the upstream key needs the administrator's password again, so a
+        // stolen admin session alone cannot replace or remove it.
+        if (Object.hasOwn(input, 'apiKey') || input.clearKey === true) {
+          throttle(req, 'admin-official-ai-key', 5, actor.id);
+          if (!await verifyPassword(actor.id, password)) throw new CloudError(403, '管理员密码不正确，API Key 未修改');
+        }
+        db.exec('BEGIN IMMEDIATE');
+        try { const changed = officialAi.update(actor.id, input); if (changed.length) audit(actor.id, 'official-ai-updated', 'official-ai', { changed }); db.exec('COMMIT'); }
+        catch (error) { db.exec('ROLLBACK'); throw error; }
+      }
+      const day = shanghaiDay(Date.now());
+      value = { ...officialAi.adminStatus(), usage: officialAi.usage(day, day.slice(0, 7)) };
     }
     else if (route === '/invitations' && req.method === 'GET') value = { items: invitations.list(actor.id), invitationRequired: invitationPolicy.required() };
     else if (route === '/invitations/settings' && req.method === 'PUT') {
