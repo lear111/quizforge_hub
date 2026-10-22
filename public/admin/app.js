@@ -4,13 +4,13 @@ const root = document.getElementById('qf-admin'), main = root.querySelector('.qa
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const size = value => value == null ? '—' : value >= 1024 ** 3 ? (value / 1024 ** 3).toFixed(2) + ' GiB' : (value / 1024 ** 2).toFixed(2) + ' MiB';
 const date = value => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '—';
-const states = { pending: '待审核', approved: '已批准', rejected: '已驳回', revoked: '已停用', unknown: '未审核', verified: '已匹配白名单', used: '已使用', available: '未使用', expired: '已过期' };
+const states = { pending: '待审核', approved: '已批准', rejected: '已驳回', revoked: '已停用', unknown: '未审核', verified: '已匹配白名单', used: '已使用', available: '未使用', expired: '已过期', redeemed: '已兑换' };
 const badge = (label, kind = '') => `<span class="qa-status ${kind}">${esc(label)}</span>`;
 const button = (action, label, attrs = '', primary = false) => `<button class="qa-btn${primary ? ' primary' : ''}" type="button" data-action="${action}" ${attrs}>${label}</button>`;
 const link = (action, label, attrs = '') => `<button class="qa-link" type="button" data-action="${action}" ${attrs}>${label}</button>`;
 const table = (heads, rows) => `<div class="qa-scroll"><table><thead><tr>${heads.map(v => `<th scope="col">${v}</th>`).join('')}</tr></thead><tbody>${rows || `<tr><td colspan="${heads.length}" class="qa-empty">暂无记录</td></tr>`}</tbody></table></div>`;
 const heading = (title, description, actions = '') => `<div class="qa-page-top"><div><h1>${title}</h1><p class="qa-muted">${description}</p></div><div class="qa-actions">${actions}</div></div>`;
-const state = { page: 'overview', days: 7, userPage: 1, userQuery: '', bankPage: 1, bankStatus: 'pending', users: [], packs: [], invites: [], extensions: [], jobs: [], newCodes: [], job: null, reviewPack: null, action: null };
+const state = { page: 'overview', days: 7, userPage: 1, userQuery: '', bankPage: 1, bankStatus: 'pending', users: [], packs: [], invites: [], extensions: [], jobs: [], newCodes: [], newAiCodes: [], job: null, reviewPack: null, action: null };
 let epoch = 0, busy = false;
 async function api(route, { body, method, ...options } = {}) {
   const response = await fetch('/api/admin' + route, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(180000), ...options, ...(body === undefined ? {} : { body: JSON.stringify(body), method: method || 'POST', headers: { 'Content-Type': 'application/json' } }), ...(method ? { method } : {}) });
@@ -37,7 +37,7 @@ async function render() {
     else if (state.page === 'users') { const value = await api('/users?' + new URLSearchParams({ page: state.userPage, q: state.userQuery })); state.users = value.users; state.defaults = value.defaults; html = users(value); }
     else if (state.page === 'banks') { const value = await api('/packs?' + new URLSearchParams({ status: state.bankStatus, page: state.bankPage })); state.packs = value.items; html = banks(value); }
     else if (state.page === 'private') { const { items } = await api('/cloud/submissions'); state.jobs = items; html = privateReview(); }
-    else if (state.page === 'official-ai') { const value = await api('/official-ai'); if (stamp !== epoch) return; html = officialAi(value); }
+    else if (state.page === 'official-ai') { const [value, { items }] = await Promise.all([api('/official-ai'), api('/ai-codes')]); if (stamp !== epoch) return; html = officialAi(value, items); }
     else if (state.page === 'trust') { const { entries } = await api('/cloud/extensions'); state.extensions = entries; html = whitelist(); }
     else { const { items } = await api('/audit'); html = heading('操作日志', '记录真实操作者、时间、对象和操作原因') + `<section class="qa-panel">${table(['时间', '操作者', '操作', '对象与详情'], items.map(i => `<tr><td>${date(i.created)}</td><td>${esc(i.actor)}</td><td>${esc(i.action)}</td><td><strong>${esc(i.target)}</strong><details><summary>查看变更</summary><pre class="qa-audit-detail">${esc(JSON.stringify(i.detail, null, 2))}</pre></details></td></tr>`).join(''))}</section>`; }
     if (stamp !== epoch) return; main.innerHTML = html;
@@ -45,16 +45,20 @@ async function render() {
     if (state.job && (state.page === 'private' || state.page === 'banks')) showJob();
   } catch (error) { if (stamp === epoch) errorView(error); }
 }
-// Official AI (docs/HUB_CONNECT_AI.md): the key is write-only and changing it needs the admin password.
-function officialAi(value) {
+// AI service (docs/HUB_CONNECT_AI.md 8.1): the key is write-only and changing it needs the admin password.
+// Redeem codes are the only way users get AI points; full codes appear once after generating.
+function officialAi(value, codes) {
   const sources = { file: '由服务器配置文件设置（优先级最高，后台不能修改）', admin: '已在后台设置', locked: '已在后台设置，但服务器缺少加密主密钥，暂时无法使用' };
   const key = value.key.configured || value.key.source === 'locked' ? `${esc(value.key.hint || '已设置')} · ${sources[value.key.source] || ''}` : '未设置';
   const used = value.monthlyTokens ? Math.min(100, Math.round(value.usage.monthTokens / value.monthlyTokens * 100)) : 0;
-  return heading('官方 AI', '给登录用户提供的官方 AI 评分 · 上游 ' + esc(value.upstreamHost) + '（地址只能在服务器配置中修改）')
-    + `<div class="qa-metrics"><section class="qa-metric"><span>状态</span><strong>${value.enabled && value.key.configured ? '运行中' : '未开启'}</strong><small>${value.enabled ? (value.key.configured ? '用户可以使用官方 AI 评分' : '已开启，但缺少 API Key') : '用户看到“官方 AI 暂未开放”'}</small></section><section class="qa-metric"><span>今日调用</span><strong>${value.usage.todayCalls}</strong><small>${value.usage.todayUsers} 个用户</small></section><section class="qa-metric"><span>本月 token</span><strong>${value.usage.monthTokens.toLocaleString('zh-CN')}</strong><small>预算的 ${used}%</small></section></div>`
-    + `<section class="qa-panel"><h2>设置</h2><form data-form="official-ai"><label class="qa-check"><input type="checkbox" role="switch" name="enabled" ${value.enabled ? 'checked' : ''}> 开启官方 AI</label><div class="qa-fields qa-ops"><label>模型名<input name="model" required maxlength="64" pattern="[A-Za-z0-9._-]+" value="${esc(value.model)}"></label><label>每账号每日次数<input type="number" name="dailyLimit" min="0" max="1000" required value="${value.dailyLimit}"></label><label>全站每月 token 预算<input type="number" name="monthlyTokens" min="0" max="10000000000" required value="${value.monthlyTokens}"></label></div>`
+  const number = n => Number(n || 0).toLocaleString('zh-CN');
+  return heading('AI 服务', '给登录用户提供的免费 AI 评分，按点数扣费 · 上游 ' + esc(value.upstreamHost) + '（地址只能在服务器配置中修改）', button('create-ai-codes', '生成兑换码', '', true))
+    + `<div class="qa-metrics"><section class="qa-metric"><span>状态</span><strong>${value.enabled && value.key.configured ? '运行中' : '未开启'}</strong><small>${value.enabled ? (value.key.configured ? '用户可以使用免费 AI 评分' : '已开启，但缺少 API Key') : '用户看到“免费 AI 暂未开放”'}</small></section><section class="qa-metric"><span>今日评分</span><strong>${number(value.usage.todayCalls)}</strong><small>${value.usage.todayUsers} 个用户 · 扣 ${number(value.usage.todayPoints)} 点</small></section><section class="qa-metric"><span>本月 token</span><strong>${number(value.usage.monthTokens)}</strong><small>全站预算的 ${used}%</small></section><section class="qa-metric"><span>用户余额合计</span><strong>${number(value.points.outstanding)} 点</strong><small>未兑换的码 ${value.points.availableCodes} 个 · ${number(value.points.availableCodePoints)} 点</small></section></div>`
+    + `<section class="qa-panel"><h2>设置</h2><form data-form="official-ai"><label class="qa-check"><input type="checkbox" role="switch" name="enabled" ${value.enabled ? 'checked' : ''}> 开启 AI 服务</label><div class="qa-fields qa-ops"><label>模型名<input name="model" required maxlength="64" pattern="[A-Za-z0-9._-]+" value="${esc(value.model)}"></label><label>每点对应 token 数<input type="number" name="tokensPerPoint" min="1" max="1000000" required value="${value.tokensPerPoint}"></label><label>全站每月 token 预算<input type="number" name="monthlyTokens" min="0" max="10000000000" required value="${value.monthlyTokens}"></label></div><p class="qa-muted">每次评分按实际 token 数扣点，不足 1 点按 1 点计；模型出错或超时不扣点。全站预算用完后本月暂停服务。</p>`
     + `<h3>API Key</h3><p class="qa-muted">当前：${key}。Key 只能写入，保存后无法再查看${value.encryptionReady ? '；在服务器上加密保存' : '；<strong>服务器尚未配置加密主密钥，不能在后台保存 Key</strong>'}。</p><div class="qa-fields qa-ops"><label>新的 API Key（留空表示不修改）<input type="password" name="apiKey" autocomplete="off" spellcheck="false" maxlength="200" ${value.encryptionReady && value.key.source !== 'file' ? '' : 'disabled'}></label><label class="qa-check"><input type="checkbox" name="clearKey" ${value.key.source === 'admin' || value.key.source === 'locked' ? '' : 'disabled'}> 清除后台保存的 Key</label><label>管理员密码（修改或清除 Key 时必填）<input type="password" name="password" autocomplete="current-password" maxlength="128"></label></div>`
-    + `<p class="qa-muted">${value.updated ? '上次修改：' + date(value.updated) + ' · ' + esc(value.updatedBy || '') : '尚未在后台修改过，当前使用服务器配置文件中的值。'}</p><p class="qa-error" role="alert"></p><div class="qa-ops"><button class="qa-btn primary" type="submit">保存设置</button></div></form></section>`;
+    + `<p class="qa-muted">${value.updated ? '上次修改：' + date(value.updated) + ' · ' + esc(value.updatedBy || '') : '尚未在后台修改过，当前使用服务器配置文件中的值。'}</p><p class="qa-error" role="alert"></p><div class="qa-ops"><button class="qa-btn primary" type="submit">保存设置</button></div></form></section>`
+    + (state.newAiCodes.length ? `<section class="qa-panel"><div class="qa-panel-top"><h2>本次生成的 ${state.newAiCodes.length} 个兑换码（每个 ${number(state.newAiCodes[0].points)} 点）</h2>${button('export-ai-codes', '导出本批次')}</div><textarea readonly aria-label="本次兑换码">${state.newAiCodes.map(i => i.code).join('\n')}</textarea><p class="qa-muted">离开或刷新页面后不再展示完整码，请及时保存。</p></section>` : '')
+    + `<section class="qa-panel"><h2>兑换码</h2><p class="qa-muted">用户在 QuizForge 的设置 → 用户中心输入兑换码获取点数，每个码只能用一次。新账号没有赠送点数。</p>${table(['识别前缀', '点数', '状态', '兑换账号', '备注', '到期时间', '操作'], codes.map(i => `<tr><td><code>${esc(i.prefix)}</code></td><td>${number(i.points)}</td><td>${badge(states[i.state], i.state === 'redeemed' ? 'ok' : i.state === 'revoked' ? 'bad' : '')}</td><td>${esc(i.redeemed_by || '—')}</td><td>${esc(i.note || '—')}</td><td>${date(i.expires)}</td><td>${i.state === 'available' ? link('revoke-ai-code', '作废', `data-id="${i.id}"`) : '—'}</td></tr>`).join(''))}</section><div id="admin-action"></div>`;
 }
 let trend = [];
 function overview(value) {
@@ -90,7 +94,7 @@ function showJob() {
 root.addEventListener('click', async event => {
   const el = event.target.closest('button'); if (!el) return;
   if (busy) { toast('操作正在处理，请等待结果。'); return; }
-  if (el.dataset.page) { state.newCodes = []; navigate(el.dataset.page); return; }
+  if (el.dataset.page) { state.newCodes = []; state.newAiCodes = []; navigate(el.dataset.page); return; }
   const action = el.dataset.action; if (!action) return;
   const id = el.dataset.id; const user = state.users.find(u=>u.id===id); el.disabled = true;
   try {
@@ -100,6 +104,9 @@ root.addEventListener('click', async event => {
     if (action==='close-action') main.querySelector('#admin-action')?.replaceChildren();
     if (action==='close-review') { state.job=null; state.reviewPack=null; main.querySelector('#admin-review')?.replaceChildren(); }
     if (action==='create-invitations') operationForm('invitations','生成邀请码','<label>数量<input type="number" name="count" min="1" max="100" value="1" required></label><label>有效天数<input type="number" name="days" min="1" max="365" value="30" required></label>','生成');
+    if (action==='create-ai-codes') operationForm('ai-codes','生成兑换码','<label>数量<input type="number" name="count" min="1" max="200" value="10" required></label><label>每个码的点数<input type="number" name="points" min="1" max="1000000" value="100" required></label><label>有效期（天）<input type="number" name="days" min="1" max="3650" value="365" required></label><label>备注（可选）<input name="note" maxlength="60"></label>','生成');
+    if (action==='revoke-ai-code') { await api('/ai-codes/'+id+'/revoke',{body:{}}); toast('兑换码已作废。'); await render(); }
+    if (action==='export-ai-codes') { const url=URL.createObjectURL(new Blob([state.newAiCodes.map(i=>i.code+'\t'+i.points+' 点\t'+date(i.expires)).join('\n')],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='quizforge-ai-codes.txt';a.click();URL.revokeObjectURL(url); }
     if (action==='revoke-invitation') { await api('/invitations/'+id+'/revoke',{body:{}}); toast('邀请码已停用。'); await render(); }
     if (action==='export-codes') { const url=URL.createObjectURL(new Blob([state.newCodes.map(i=>i.code+'\t'+date(i.expires)).join('\n')],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='quizforge-invitations.txt';a.click();URL.revokeObjectURL(url); }
     if (action==='user-page') { state.userPage=Number(el.dataset.pageNumber); await render(); }
@@ -135,10 +142,12 @@ root.addEventListener('submit',async event=>{
   if(busy)return;const data=new FormData(form),kind=form.dataset.form,submitter=event.submitter||form.querySelector('[type=submit]');busy=kind!=='search-users';submitter.disabled=true;const originalLabel=submitter.textContent;submitter.textContent='正在处理…';toast('正在处理，请等待结果…');
   try{
     if(kind==='official-ai'){
-      const body={enabled:data.has('enabled'),model:String(data.get('model')||'').trim(),dailyLimit:Number(data.get('dailyLimit')),monthlyTokens:Number(data.get('monthlyTokens'))};
+      const body={enabled:data.has('enabled'),model:String(data.get('model')||'').trim(),tokensPerPoint:Number(data.get('tokensPerPoint')),monthlyTokens:Number(data.get('monthlyTokens'))};
       const key=String(data.get('apiKey')||'');if(key)body.apiKey=key;if(data.has('clearKey'))body.clearKey=true;
       if(body.apiKey||body.clearKey){body.password=String(data.get('password')||'');if(!body.password)throw new Error('修改或清除 API Key 需要输入管理员密码');}
-      await api('/official-ai',{method:'PUT',body});form.reset();await render();toast(body.apiKey?'设置已保存，新的 API Key 已加密保存。':body.clearKey?'设置已保存，后台的 API Key 已清除。':'官方 AI 设置已保存，立即生效。');return;
+      await api('/official-ai',{method:'PUT',body});form.reset();await render();toast(body.apiKey?'设置已保存，新的 API Key 已加密保存。':body.clearKey?'设置已保存，后台的 API Key 已清除。':'AI 服务设置已保存，立即生效。');return;
+    }
+    if(kind==='ai-codes'){state.newAiCodes=(await api('/ai-codes',{body:{count:Number(data.get('count')),points:Number(data.get('points')),days:Number(data.get('days')),note:String(data.get('note')||'').trim()}})).items;await render();toast('兑换码已生成，完整码仅在本次页面中保留，请及时保存。');return;
     }
     if(kind==='search-users'){state.userQuery=String(data.get('q')||'').trim();state.userPage=1;await render();return;}
     if(kind==='invitation-policy'){const value=await api('/invitations/settings',{method:'PUT',body:{invitationRequired:data.has('invitationRequired')}});await render();toast(value.invitationRequired?'已开启邀请码验证，立即对新注册生效。':'已关闭邀请码验证，注册仍需完成邮箱和人机验证。');return;}
@@ -152,6 +161,6 @@ root.addEventListener('submit',async event=>{
     if(kind==='review'){const input={decision:submitter.value,reason:data.get('reason'),codeReviewed:data.has('codeReviewed')};if(state.reviewPack){await api('/packs/'+state.reviewPack.id+'/decision',{body:{...input,revision:state.reviewPack.revision}});toast(input.decision==='approved'?'整包审核通过，内含拓展哈希已同步登记。':'题库已驳回。');}else{await api('/cloud/submissions/'+state.job.id+'/decision',{body:input});toast(input.decision==='approved'?'拓展哈希已加入全站白名单。':'拓展申请已驳回。');}state.job=null;state.reviewPack=null;await render();}
   }catch(error){const node=form.querySelector('[role=alert]')||main.querySelector('#action-error');if(node)node.textContent=error.message;toast(error.message);}finally{busy=false;submitter.disabled=false;submitter.textContent=originalLabel;}
 });
-window.addEventListener('hashchange',()=>{if(busy){if(location.hash.slice(1)!==state.page)location.hash=state.page;return;}state.newCodes=[];state.job=null;state.reviewPack=null;render().then(()=>{if(state.openPreaudit){state.openPreaudit=false;operationForm('preaudit','添加 / 预审拓展','<label class="qa-wide">拓展 ZIP 或含拓展的 .qbank<input type="file" name="package" accept=".zip,.qbank" required></label>','上传并核验哈希');}});});
+window.addEventListener('hashchange',()=>{if(busy){if(location.hash.slice(1)!==state.page)location.hash=state.page;return;}state.newCodes=[];state.newAiCodes=[];state.job=null;state.reviewPack=null;render().then(()=>{if(state.openPreaudit){state.openPreaudit=false;operationForm('preaudit','添加 / 预审拓展','<label class="qa-wide">拓展 ZIP 或含拓展的 .qbank<input type="file" name="package" accept=".zip,.qbank" required></label>','上传并核验哈希');}});});
 if(typeof ResizeObserver!=='undefined')new ResizeObserver(()=>{if(state.page==='overview')drawChart();}).observe(main);
 try{const response=await fetch('/api/me',{credentials:'same-origin'}),{user}=await response.json();if(!user?.admin)throw Object.assign(new Error('请使用管理员账号登录'),{status:user?403:401});document.getElementById('admin-account').textContent=user.name;bindActivity({document});await render();toast('已连接正式管理接口。');}catch(error){errorView(error);}

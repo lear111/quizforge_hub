@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { ConnectError } from './connect.mjs';
 
-// Official AI settings managed from the admin backend (docs/HUB_CONNECT_AI.md 8).
+// AI service settings managed from the admin backend (docs/HUB_CONNECT_AI.md 8).
 // The upstream API key is stored encrypted (AES-256-GCM) with a master key that
 // only systemd passes in (OFFICIAL_AI_MASTER_KEY from a root-only file), so the
 // database or a data backup alone never reveals it. The key is write-only: no
@@ -31,6 +31,8 @@ const hint = key => key.length > 8 ? `${key.slice(0, 3)}…${key.slice(-4)}` : '
 
 export function createOfficialAiConfig({ db, base, master, now = () => Date.now() }) {
   db.exec('CREATE TABLE IF NOT EXISTS official_ai_config (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL, model TEXT NOT NULL, daily_limit INTEGER NOT NULL, monthly_tokens INTEGER NOT NULL, key_cipher TEXT, key_hint TEXT, updated INTEGER NOT NULL, updated_by TEXT)');
+  // daily_limit is no longer used: grading spends AI points instead (section 6.1).
+  if (!db.prepare('PRAGMA table_info(official_ai_config)').all().some(column => column.name === 'tokens_per_point')) db.exec('ALTER TABLE official_ai_config ADD COLUMN tokens_per_point INTEGER NOT NULL DEFAULT 1000');
   const row = () => db.prepare('SELECT * FROM official_ai_config WHERE id=1').get();
   let cache = null;
   // Effective settings. Without an admin row the server file applies as before;
@@ -45,24 +47,24 @@ export function createOfficialAiConfig({ db, base, master, now = () => Date.now(
       if (!key) keySource = 'locked';
     }
     const value = saved
-      ? { enabled: !!saved.enabled, baseUrl: base.baseUrl, model: saved.model, dailyLimit: saved.daily_limit, monthlyTokens: saved.monthly_tokens, key, keySource, keyHint: base.key ? hint(base.key) : saved.key_hint }
+      ? { enabled: !!saved.enabled, baseUrl: base.baseUrl, model: saved.model, tokensPerPoint: saved.tokens_per_point, monthlyTokens: saved.monthly_tokens, key, keySource, keyHint: base.key ? hint(base.key) : saved.key_hint }
       : { ...base, key, keySource, keyHint: key ? hint(key) : null };
     cache = { stamp, value }; return value;
   }
   function adminStatus() {
     const value = current(), saved = row();
-    return { enabled: value.enabled, model: value.model, dailyLimit: value.dailyLimit, monthlyTokens: value.monthlyTokens, upstreamHost: new URL(value.baseUrl).host,
+    return { enabled: value.enabled, model: value.model, tokensPerPoint: value.tokensPerPoint, monthlyTokens: value.monthlyTokens, upstreamHost: new URL(value.baseUrl).host,
       key: { configured: !!value.key, source: value.keySource, hint: value.keyHint || null }, encryptionReady: !!master, managedByAdmin: !!saved,
       updated: saved?.updated ?? null, updatedBy: saved?.updated_by ? db.prepare('SELECT name FROM users WHERE id=?').get(saved.updated_by)?.name ?? null : null };
   }
   // Applies an admin change. Returns the changed field names (never values of the key).
   function update(actorId, input) {
-    const allowed = ['enabled', 'model', 'dailyLimit', 'monthlyTokens', 'apiKey', 'clearKey', 'password'];
+    const allowed = ['enabled', 'model', 'tokensPerPoint', 'monthlyTokens', 'apiKey', 'clearKey', 'password'];
     if (!input || typeof input !== 'object' || Object.keys(input).some(field => !allowed.includes(field))) fail(400, 'AI_SETTINGS_INVALID', '设置字段无效');
-    const value = current(), next = { enabled: value.enabled, model: value.model, dailyLimit: value.dailyLimit, monthlyTokens: value.monthlyTokens };
-    if (Object.hasOwn(input, 'enabled')) { if (typeof input.enabled !== 'boolean') fail(400, 'AI_SETTINGS_INVALID', '请明确选择是否开启官方 AI'); next.enabled = input.enabled; }
+    const value = current(), next = { enabled: value.enabled, model: value.model, tokensPerPoint: value.tokensPerPoint, monthlyTokens: value.monthlyTokens };
+    if (Object.hasOwn(input, 'enabled')) { if (typeof input.enabled !== 'boolean') fail(400, 'AI_SETTINGS_INVALID', '请明确选择是否开启 AI 服务'); next.enabled = input.enabled; }
     if (Object.hasOwn(input, 'model')) { if (!MODEL.test(input.model)) fail(400, 'AI_SETTINGS_INVALID', '模型名只能包含字母、数字、点、下划线和连字符，最多 64 个字符'); next.model = input.model; }
-    if (Object.hasOwn(input, 'dailyLimit')) { if (!Number.isInteger(input.dailyLimit) || input.dailyLimit < 0 || input.dailyLimit > 1000) fail(400, 'AI_SETTINGS_INVALID', '每日次数需为 0–1000 的整数'); next.dailyLimit = input.dailyLimit; }
+    if (Object.hasOwn(input, 'tokensPerPoint')) { if (!Number.isInteger(input.tokensPerPoint) || input.tokensPerPoint < 1 || input.tokensPerPoint > 1000000) fail(400, 'AI_SETTINGS_INVALID', '每点对应的 token 数需为 1–1000000 的整数'); next.tokensPerPoint = input.tokensPerPoint; }
     if (Object.hasOwn(input, 'monthlyTokens')) { if (!Number.isSafeInteger(input.monthlyTokens) || input.monthlyTokens < 0 || input.monthlyTokens > 1e10) fail(400, 'AI_SETTINGS_INVALID', '每月 token 预算需为 0–100 亿的整数'); next.monthlyTokens = input.monthlyTokens; }
     const saved = row(); let cipher = saved?.key_cipher ?? null, keyHint = saved?.key_hint ?? null, keyChange = null;
     if (Object.hasOwn(input, 'apiKey') || input.clearKey === true) {
@@ -74,17 +76,17 @@ export function createOfficialAiConfig({ db, base, master, now = () => Date.now(
         cipher = encryptKey(master, input.apiKey); keyHint = hint(input.apiKey); keyChange = 'replaced';
       }
     }
-    const changed = ['enabled', 'model', 'dailyLimit', 'monthlyTokens'].filter(field => next[field] !== value[field] || !saved);
+    const changed = ['enabled', 'model', 'tokensPerPoint', 'monthlyTokens'].filter(field => next[field] !== value[field] || !saved);
     if (keyChange) changed.push(keyChange === 'cleared' ? 'apiKey:cleared' : 'apiKey:replaced');
-    db.prepare(`INSERT INTO official_ai_config VALUES (1,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,model=excluded.model,daily_limit=excluded.daily_limit,monthly_tokens=excluded.monthly_tokens,key_cipher=excluded.key_cipher,key_hint=excluded.key_hint,updated=excluded.updated,updated_by=excluded.updated_by`)
-      .run(next.enabled ? 1 : 0, next.model, next.dailyLimit, next.monthlyTokens, cipher, keyHint, Math.max(now(), (saved?.updated ?? 0) + 1), actorId);
+    db.prepare(`INSERT INTO official_ai_config (id,enabled,model,daily_limit,monthly_tokens,key_cipher,key_hint,updated,updated_by,tokens_per_point) VALUES (1,?,?,0,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,model=excluded.model,tokens_per_point=excluded.tokens_per_point,monthly_tokens=excluded.monthly_tokens,key_cipher=excluded.key_cipher,key_hint=excluded.key_hint,updated=excluded.updated,updated_by=excluded.updated_by`)
+      .run(next.enabled ? 1 : 0, next.model, next.monthlyTokens, cipher, keyHint, Math.max(now(), (saved?.updated ?? 0) + 1), actorId, next.tokensPerPoint);
     cache = null;
     return changed;
   }
   function usage(day, month) {
-    const today = db.prepare('SELECT COALESCE(SUM(calls),0) AS calls, COUNT(*) AS users FROM official_ai_usage WHERE day=? AND calls>0').get(day);
+    const today = db.prepare('SELECT COALESCE(SUM(calls),0) AS calls, COUNT(*) AS users, COALESCE(SUM(points),0) AS points FROM official_ai_usage WHERE day=? AND calls>0').get(day);
     const tokens = db.prepare('SELECT tokens FROM official_ai_budget WHERE period=?').get(month)?.tokens || 0;
-    return { todayCalls: today.calls, todayUsers: today.users, monthTokens: tokens };
+    return { todayCalls: today.calls, todayUsers: today.users, todayPoints: today.points, monthTokens: tokens };
   }
   return { current, adminStatus, update, usage };
 }

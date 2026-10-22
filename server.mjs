@@ -23,6 +23,7 @@ import { ReviewPackages } from './admin/review-packages.mjs';
 import { createConnect, ConnectError } from './connect.mjs';
 import { createOfficialAi, officialAiSettings, shanghaiDay } from './official-ai.mjs';
 import { createOfficialAiConfig, masterKey } from './official-ai-config.mjs';
+import { createAiPoints } from './ai-points.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
@@ -276,14 +277,15 @@ export async function createApp(options = {}) {
     const [salt, digest] = row.password.split(':'), candidate = await derive(password, salt, 64), expected = Buffer.from(digest, 'hex');
     return expected.length === candidate.length && timingSafeEqual(candidate, expected);
   };
-  const handleAdmin = createHubAdmin({ db, officialAi: aiConfig, verifyPassword, shanghaiDay, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
+  const aiPoints = createAiPoints({ db, now: options.now });
+  const handleAdmin = createHubAdmin({ db, officialAi: aiConfig, aiPoints, verifyPassword, shanghaiDay, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
   // Hub account connection and the official AI gateway (docs/HUB_CONNECT_AI.md).
   const aiSettings = () => aiConfig.current();
-  const connect = createConnect({ db, enabled: () => aiSettings().enabled, identity, throttle, json, bodyJson, dailyLimit: () => aiSettings().dailyLimit, modelLabel: () => '通义千问 ' + aiSettings().model, now: options.now });
-  const officialAi = createOfficialAi({ db, settings: aiSettings, connect, json, readBody, now: options.now, fetchImpl: options.officialAiFetch });
+  const connect = createConnect({ db, enabled: () => aiSettings().enabled, identity, throttle, json, bodyJson, points: aiPoints, modelLabel: () => '通义千问 ' + aiSettings().model, now: options.now });
+  const officialAi = createOfficialAi({ db, settings: aiSettings, connect, points: aiPoints, json, readBody, now: options.now, fetchImpl: options.officialAiFetch });
   // These device endpoints authenticate only with a Bearer device token and never
   // read cookies, so native clients may call them without a browser Origin.
-  const deviceRoutes = new Set(['/api/connect/token', '/api/connect/logout', '/api/ai/v1/chat/completions']);
+  const deviceRoutes = new Set(['/api/connect/token', '/api/connect/logout', '/api/connect/redeem', '/api/ai/v1/chat/completions']);
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
