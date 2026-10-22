@@ -1,8 +1,8 @@
 # QuizForge 题库广场
 
-QuizForge 的题库广场和云端练习服务，共用 Hub 账号。公共题库支持下载文件、唤醒本地 QuizForge 导入，以及下载到云端练习。题库广场：**https://quizforge.treenewbee.cloud/**；云端练习：**https://practice.treenewbee.cloud/**。线上使用独立数据目录，部署不迁移本机账号或测试数据。
+QuizForge 的云端产品，融合题库广场与在线练习，沿用 Hub 的账户和登录系统；本地产品为 QuizForge。题库广场：**https://quizforge.treenewbee.cloud/**；在线练习：**https://practice.treenewbee.cloud/**。公共题库支持下载文件、唤醒本地 QuizForge 导入，以及下载到云端练习。
 
-正式管理后台入口为 `/admin/`，需设置 `ADMIN_ENABLED=1` 并使用已明确授予管理员权限的账号登录。功能、隔离预审流程、统计口径与双服务部署配置见 [管理后台](docs/ADMIN.md)。
+云端是基于固定 Web 运行时的邀请制试用版本，已接通浏览器直连 AI 评分、公共/私人题库导入、空间与每日下载额度。2026-10-20 新增正式 [管理后台](docs/ADMIN.md)，入口为 `/admin/`，使用已明确授予管理员权限的 Hub 账号登录。完整浏览器及设备验收仍待完成。历史开发状态见 [云端实现清单](docs/CLOUD_IMPLEMENTATION.md)；线上服务不会因本地源码变更而自动更新。
 
 刷题工作区按 Web 完整同步，主要差异保留在云端设置与账号存储适配。当前版本包含答题区、原生文件导入、单题编辑和统一题库列表；来源、旧数据合并及发布前检查见 [工作区同步说明](docs/WEB_WORKSPACE_SYNC.md)，线上版本与验证范围见 [部署记录](deploy/workspace-2026-10-21.md)。
 
@@ -71,7 +71,7 @@ Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 
 | `COOKIE_SECURE` | `0` | 本地 HTTP 为 0，生产 HTTPS 必须为 1 |
 | `INVITATION_REQUIRED` | `0` | 首次初始化邀请码验证开关；后续在管理后台的邀请码页面保存，重启保留管理员选择 |
 | `TRUST_PROXY` | `0` | 生产只有在 Node 端口不对外开放、反向代理覆盖 `X-Real-IP` 时才设为 1 |
-| `LOCAL_IMPORT_ENABLED` | `0` | 设为 1 开启公共 `.qbank` 的本地唤醒入口及固定版本下载接口；当前设备需安装支持协议 v1 的 QuizForge 客户端 |
+| `LOCAL_IMPORT_ENABLED` | `0` | 设为 1 开启公共 .qbank 本地唤醒与固定版本下载，独立于云端功能；当前设备需安装支持协议 v1 的 QuizForge 客户端 |
 | `MAX_ARCHIVE_MB` | `20` | 单个压缩包上限，MiB；调整时同步修改反向代理请求体限制 |
 | `USER_QUOTA_MB` | `500` | 单个上传者附件存储上限，MiB |
 | `TOTAL_QUOTA_MB` | `5000` | 所有题库附件存储总上限，MiB |
@@ -123,6 +123,10 @@ Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 
 在私有环境文件设置 `REVIEW_EMAIL`（管理员收件地址）及 `TENCENT_SES_REVIEW_TEMPLATE_ID`（审核通过的提醒模板 ID），继续使用已有 SES 发件人和 SendEmail 权限。提醒内容模板见 `deploy/review-email-template.html`，应另建模板，不复用注册验证码模板。服务重启后会处理已有待审任务。
 
 邮件只提醒登录审核列表，不附加上传者填写的标题、正文或附件。新提交立即尝试提醒，15 分钟内合并，滚动 24 小时至多 24 次；发送失败也扣额度，30 分钟后重试。注册邮件仍沿用独立的 100 次上限，两者额度分别记录。模板尚未配置时上传仍正常，管理员页面显示配置未完成，待提醒任务保留。
+
+## 云端普通用户刷题入口
+
+普通用户刷题站现位于 [practice.treenewbee.cloud](https://practice.treenewbee.cloud/)，使用原 Hub 账号登录后直接进入基础题库。它使用独立数据目录；AI 评分通过用户浏览器直连其自填模型，API Key 留在本机。实现与验收边界见 `docs/CLOUD_IMPLEMENTATION.md`、`docs/CLOUD_QA_2026-10-19.md` 和 `docs/ADMIN.md`。
 
 ## 题库广场入口
 
