@@ -84,7 +84,7 @@ test('a logged-out browser goes to login first, then a consent page; allowing is
   const request = /^\/manage\/#connect-login\/([a-f0-9]{64})$/.exec(anonymous.headers.get('location'))[1];
   const page = await f.request('/connect/authorize?request=' + request, { user: 'alice' });
   const html = await page.text();
-  assert.equal(page.status, 200); assert.match(html, /&lt;script&gt;书房&lt;\/script&gt;/); assert.doesNotMatch(html, /<script>书房/); assert.match(html, /当前剩余 ¥0\.00/);
+  assert.equal(page.status, 200); assert.match(html, /&lt;script&gt;书房&lt;\/script&gt;/); assert.doesNotMatch(html, /<script>书房/); assert.match(html, /授权这台设备登录/); assert.doesNotMatch(html, /AI 额度/, 'the consent page is about signing in, not one feature');
   assert.equal((await f.request('/connect/authorize?v=1&client=web', { user: 'alice' })).status, 400);
   const noOrigin = await f.request('/api/connect/authorize', { method: 'POST', user: 'alice', origin: null, body: { request, decision: 'allow' } });
   assert.equal(noOrigin.status, 403, 'the consent decision keeps the same-origin check');

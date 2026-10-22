@@ -281,7 +281,7 @@ export async function createApp(options = {}) {
   const aiPoints = createAiPoints({ db, master: aiMaster, now: options.now });
   const handleAdmin = createHubAdmin({ db, officialAi: aiConfig, aiPoints, verifyPassword, shanghaiDay, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
   // Hub account connection and the official AI gateway (docs/HUB_CONNECT_AI.md).
-  const connect = createConnect({ db, enabled: () => aiConfig.enabled(), identity, throttle, json, bodyJson, points: aiPoints, modelLabel: () => '通义千问 ' + aiConfig.label(), now: options.now });
+  const connect = createConnect({ db, enabled: () => aiConfig.enabled(), identity, throttle, json, bodyJson, points: aiPoints, now: options.now });
   const officialAi = createOfficialAi({ db, config: aiConfig, connect, points: aiPoints, json, readBody, now: options.now, fetchImpl: options.officialAiFetch });
   // These device endpoints authenticate only with a Bearer device token and never
   // read cookies, so native clients may call them without a browser Origin.
