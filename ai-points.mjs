@@ -1,11 +1,13 @@
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { ConnectError } from './connect.mjs';
+import { encryptKey, decryptKey } from './official-ai-config.mjs';
 
 // Free AI balance (docs/HUB_CONNECT_AI.md section 6.1), in yuan. Amounts are
 // integers in units of 0.0001 yuan (UNIT). Only redeem codes add to a balance;
-// grading spends it by the tokens used. Codes are shown once and stored as SHA-256.
+// grading spends it by the tokens used. Codes are looked up by SHA-256; the full code
+// is also kept encrypted with the AI master key so administrators can see unused codes.
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-const HOUR = 3600000, MAX_FAILURES = 10;
+const HOUR = 3600000, MAX_FAILURES = 10, CODE_AAD = Buffer.from('quizforge-redeem-code-v1');
 export const UNIT = 10000;
 export const yuan = amount => (Math.floor(amount / 100) / 100).toFixed(2);
 const fail = (status, code, message, extra) => { throw new ConnectError(status, code, message, extra); };
@@ -22,14 +24,22 @@ function newCode() {
   return { body, code: 'AI-' + body.match(/.{4}/g).join('-') };
 }
 
-export function createAiPoints({ db, now = () => Date.now() }) {
+export function createAiPoints({ db, master = null, now = () => Date.now() }) {
   db.exec(`CREATE TABLE IF NOT EXISTS ai_points (user_id TEXT PRIMARY KEY REFERENCES users(id), balance INTEGER NOT NULL, updated INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS ai_redeem_codes (id TEXT PRIMARY KEY, digest TEXT UNIQUE NOT NULL, prefix TEXT NOT NULL, points INTEGER NOT NULL, note TEXT NOT NULL, created_by TEXT NOT NULL REFERENCES users(id), created INTEGER NOT NULL, expires INTEGER NOT NULL, revoked INTEGER, redeemed INTEGER, user_id TEXT REFERENCES users(id));
     CREATE TABLE IF NOT EXISTS ai_points_ledger (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), delta INTEGER NOT NULL, kind TEXT NOT NULL, ref TEXT, created INTEGER NOT NULL);`);
+  // revoked doubles as "stopped" and can be cleared again; seq is the number shown in the admin list.
+  const columns = db.prepare('PRAGMA table_info(ai_redeem_codes)').all().map(column => column.name);
+  if (!columns.includes('code_cipher')) db.exec('ALTER TABLE ai_redeem_codes ADD COLUMN code_cipher TEXT');
+  if (!columns.includes('seq')) {
+    db.exec('ALTER TABLE ai_redeem_codes ADD COLUMN seq INTEGER');
+    db.prepare('SELECT id FROM ai_redeem_codes ORDER BY created, id').all().forEach((row, index) => db.prepare('UPDATE ai_redeem_codes SET seq=? WHERE id=?').run(index + 1, row.id));
+  }
+  const readCode = cipher => { try { return cipher && master ? decryptKey(master, cipher, CODE_AAD) : null; } catch { return null; } };
   const failures = new Map();
   const balance = userId => db.prepare('SELECT balance FROM ai_points WHERE user_id=?').get(userId)?.balance || 0;
   const add = (userId, delta, time) => db.prepare('INSERT INTO ai_points VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET balance=MAX(balance+excluded.balance,0),updated=excluded.updated').run(userId, delta, time);
-  const state = row => row.redeemed !== null ? 'redeemed' : row.revoked !== null ? 'revoked' : row.expires <= now() ? 'expired' : 'available';
+  const state = row => row.redeemed !== null ? 'redeemed' : row.revoked !== null ? 'disabled' : row.expires <= now() ? 'expired' : 'available';
 
   // Spends up to `amount` after a successful grading. Concurrent gradings may
   // both start with a small balance; the balance then stops at 0, never below.
@@ -66,41 +76,58 @@ export function createAiPoints({ db, now = () => Date.now() }) {
     return { added: row.points, balance: balance(userId) };
   }
 
+  const fail400 = message => fail(400, 'AI_CODES_INVALID', message);
+  const noteOf = value => { const note = typeof value === 'string' ? value.trim() : ''; if (Array.from(note).length > 60) fail400('备注最多 60 个字符'); return note; };
+  // New codes start enabled. expires is a timestamp chosen in the admin form.
   function createCodes(actorId, input) {
-    const count = input?.count, amount = input?.amount, days = input?.days, note = typeof input?.note === 'string' ? input.note.trim() : '';
-    if (!Number.isSafeInteger(count) || count < 1 || count > 200) fail(400, 'AI_CODES_INVALID', '每次生成 1–200 个兑换码');
-    if (!Number.isSafeInteger(amount) || amount < 100 || amount > 10000 * UNIT) fail(400, 'AI_CODES_INVALID', '每个兑换码的面值需为 0.01–10000 元');
-    if (!Number.isSafeInteger(days) || days < 1 || days > 3650) fail(400, 'AI_CODES_INVALID', '有效期需为 1–3650 天');
-    if (Array.from(note).length > 60) fail(400, 'AI_CODES_INVALID', '备注最多 60 个字符');
-    const time = now(), expires = time + days * 86400000, issued = [];
+    const allowed = ['count', 'amount', 'expires', 'note'];
+    if (!input || typeof input !== 'object' || Object.keys(input).some(field => !allowed.includes(field))) fail400('字段无效');
+    const { count, amount, expires } = input, note = noteOf(input.note), time = now();
+    if (!Number.isSafeInteger(count) || count < 1 || count > 200) fail400('每次生成 1–200 个兑换码');
+    if (!Number.isSafeInteger(amount) || amount < 100 || amount > 10000 * UNIT) fail400('每个兑换码的金额需为 0.01–10000 元');
+    if (!Number.isSafeInteger(expires) || expires <= time || expires > time + 3650 * 86400000) fail400('到期时间需在今天之后、10 年以内');
+    const issued = [];
     db.exec('BEGIN IMMEDIATE');
     try {
+      let seq = db.prepare('SELECT COALESCE(MAX(seq),0) AS n FROM ai_redeem_codes').get().n;
       for (let i = 0; i < count; i++) {
         const { body, code } = newCode(), id = randomUUID();
-        db.prepare('INSERT INTO ai_redeem_codes (id,digest,prefix,points,note,created_by,created,expires) VALUES (?,?,?,?,?,?,?,?)').run(id, digest(body), code.slice(0, 7), amount, note, actorId, time, expires);
-        issued.push({ id, code, amount, expires });
+        db.prepare('INSERT INTO ai_redeem_codes (id,digest,prefix,points,note,created_by,created,expires,code_cipher,seq) VALUES (?,?,?,?,?,?,?,?,?,?)')
+          .run(id, digest(body), code.slice(0, 7), amount, note, actorId, time, expires, master ? encryptKey(master, code, CODE_AAD) : null, ++seq);
+        issued.push({ id, seq, code, amount, expires });
       }
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
     return issued;
   }
 
+  // Unused codes show in full; redeemed ones only by prefix.
   function listCodes() {
-    const rows = db.prepare('SELECT c.id,c.prefix,c.points AS amount,c.note,c.created,c.expires,c.revoked,c.redeemed,u.name AS redeemed_by FROM ai_redeem_codes c LEFT JOIN users u ON u.id=c.user_id ORDER BY c.created DESC,c.id LIMIT 500').all();
-    return rows.map(row => ({ ...row, state: state(row) }));
+    const rows = db.prepare('SELECT c.*,u.name AS redeemed_by FROM ai_redeem_codes c LEFT JOIN users u ON u.id=c.user_id ORDER BY c.seq DESC LIMIT 1000').all();
+    return rows.map(row => {
+      const code = row.redeemed === null ? readCode(row.code_cipher) : null;
+      return { id: row.id, seq: row.seq, code: code || row.prefix + '-…', full: !!code, note: row.note, created: row.created, expires: row.expires, amount: row.points, enabled: row.revoked === null, state: state(row), redeemedBy: row.redeemed_by, redeemed: row.redeemed };
+    });
   }
 
-  function revokeCode(id) {
+  // Edits the note or switches a code on or off. A redeemed code cannot be switched.
+  function updateCode(id, input) {
     const row = db.prepare('SELECT * FROM ai_redeem_codes WHERE id=?').get(id) || fail(404, 'AI_CODE_NOT_FOUND', '兑换码不存在');
-    if (row.redeemed !== null) fail(409, 'AI_CODE_REDEEMED', '兑换码已被使用，不能作废');
-    if (row.revoked === null) db.prepare('UPDATE ai_redeem_codes SET revoked=? WHERE id=?').run(now(), id);
-    return row;
+    if (!input || typeof input !== 'object' || !Object.keys(input).length || Object.keys(input).some(field => !['note', 'enabled'].includes(field))) fail400('只能修改备注和启用状态');
+    const changed = [];
+    if (Object.hasOwn(input, 'note')) { const note = noteOf(input.note); if (note !== row.note) { db.prepare('UPDATE ai_redeem_codes SET note=? WHERE id=?').run(note, id); changed.push('note'); } }
+    if (Object.hasOwn(input, 'enabled')) {
+      if (typeof input.enabled !== 'boolean') fail400('请明确选择启用或停用');
+      if (row.redeemed !== null) fail(409, 'AI_CODE_REDEEMED', '兑换码已被使用，不能再启用或停用');
+      if (input.enabled !== (row.revoked === null)) { db.prepare('UPDATE ai_redeem_codes SET revoked=? WHERE id=?').run(input.enabled ? null : now(), id); changed.push(input.enabled ? 'enabled' : 'disabled'); }
+    }
+    return { row, changed };
   }
 
   function summary() {
-    const codes = db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(points),0) AS points FROM ai_redeem_codes WHERE redeemed IS NULL AND revoked IS NULL AND expires>?').get(now());
-    return { outstanding: db.prepare('SELECT COALESCE(SUM(balance),0) AS n FROM ai_points').get().n, availableCodes: codes.n, availableCodeAmount: codes.points };
+    const codes = db.prepare('SELECT COALESCE(SUM(points),0) AS total, COALESCE(SUM(CASE WHEN redeemed IS NOT NULL THEN points ELSE 0 END),0) AS used FROM ai_redeem_codes').get();
+    return { userBalance: db.prepare('SELECT COALESCE(SUM(balance),0) AS n FROM ai_points').get().n, codeTotal: codes.total, codeRedeemed: codes.used };
   }
 
-  return { balance, charge, redeem, createCodes, listCodes, revokeCode, summary };
+  return { balance, charge, redeem, createCodes, listCodes, updateCode, summary };
 }

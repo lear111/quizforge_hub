@@ -40,34 +40,44 @@ export function createHubAdmin({ db, invitations, invitationPolicy, metrics, req
       const local = metrics.overview(Number(url.searchParams.get('days'))), remote = await call(req, '/summary');
       value = { ...local, transfers: { requests: local.transfers.requests + remote.transfers.requests, bytes: local.transfers.bytes + remote.transfers.bytes }, cloud: remote };
     }
+    // AI service (docs/HUB_CONNECT_AI.md 8.1). Adding a key needs the admin password
+    // again; keys are never returned, and a saved key's address cannot change.
     else if (route === '/official-ai' && ['GET', 'PUT'].includes(req.method) && officialAi) {
       if (req.method === 'PUT') {
-        const { password, ...input } = await jsonBody(req);
-        // Changing the upstream key needs the administrator's password again, so a
-        // stolen admin session alone cannot replace or remove it.
-        if (Object.hasOwn(input, 'apiKey') || input.clearKey === true) {
-          throttle(req, 'admin-official-ai-key', 5, actor.id);
-          if (!await verifyPassword(actor.id, password)) throw new CloudError(403, '管理员密码不正确，API Key 未修改');
-        }
-        db.exec('BEGIN IMMEDIATE');
-        try { const changed = officialAi.update(actor.id, input); if (changed.length) audit(actor.id, 'official-ai-updated', 'official-ai', { changed }); db.exec('COMMIT'); }
-        catch (error) { db.exec('ROLLBACK'); throw error; }
+        const input = await jsonBody(req);
+        if (Object.keys(input).length !== 1 || !Object.hasOwn(input, 'enabled')) throw new CloudError(400, '只能切换 AI 服务开关');
+        officialAi.setEnabled(actor.id, input.enabled); audit(actor.id, input.enabled ? 'ai-service-on' : 'ai-service-off', 'ai-service', {});
       }
-      const day = shanghaiDay(Date.now());
-      value = { ...officialAi.adminStatus(), usage: officialAi.usage(day, day.slice(0, 7)), points: aiPoints.summary() };
+      value = { ...officialAi.adminStatus(), stats: { ...officialAi.usage(shanghaiDay(Date.now())), userBalance: aiPoints.summary().userBalance } };
     }
-    // AI redeem codes are the only way to add points; full codes appear once, in this response.
-    else if (route === '/ai-codes' && req.method === 'GET' && aiPoints) value = { items: aiPoints.listCodes() };
+    else if (route === '/ai-keys' && req.method === 'POST' && officialAi) {
+      const { password, ...input } = await jsonBody(req);
+      throttle(req, 'admin-ai-key', 10, actor.id);
+      if (!await verifyPassword(actor.id, password)) throw new CloudError(403, '管理员密码不正确，API Key 未添加');
+      value = await officialAi.addKey(input); status = 201;
+      audit(actor.id, 'ai-key-added', value.item.id, { seq: value.item.seq, host: value.item.host, model: value.item.model, test: value.test.status });
+    }
+    else if (route === '/ai-keys/order' && req.method === 'PUT' && officialAi) { officialAi.reorder((await jsonBody(req)).ids); audit(actor.id, 'ai-keys-reordered', 'ai-keys', {}); value = { ok: true }; }
+    else if (/^\/ai-keys\/[a-f0-9-]{36}(\/(test|enabled))?$/.test(route) && officialAi) {
+      const [, , id, action] = route.split('/');
+      if (!action && req.method === 'PUT') { value = officialAi.updateKey(id, await jsonBody(req)); if (value.changed.length) audit(actor.id, 'ai-key-updated', id, { seq: value.item.seq, changed: value.changed }); }
+      else if (!action && req.method === 'DELETE') { const item = officialAi.removeKey(id); audit(actor.id, 'ai-key-deleted', id, { seq: item.seq, host: item.host, model: item.model }); value = { ok: true }; }
+      else if (action === 'test' && req.method === 'POST') { throttle(req, 'admin-ai-key-test', 20, actor.id); value = await officialAi.testKey(id); }
+      else if (action === 'enabled' && req.method === 'PUT') { const { enabled } = await jsonBody(req); const item = officialAi.setKeyEnabled(id, enabled); audit(actor.id, enabled ? 'ai-key-enabled' : 'ai-key-disabled', id, { seq: item.seq }); value = { item }; }
+      else throw new CloudError(405, '不支持的操作');
+    }
+    // Redeem codes are the only way to add to a user's balance.
+    else if (route === '/ai-codes' && req.method === 'GET' && aiPoints) { const summary = aiPoints.summary(); value = { items: aiPoints.listCodes(), stats: { total: summary.codeTotal, redeemed: summary.codeRedeemed } }; }
     else if (route === '/ai-codes' && req.method === 'POST' && aiPoints) {
       throttle(req, 'admin-ai-codes', 10, actor.id);
       const input = await jsonBody(req);
       value = { items: aiPoints.createCodes(actor.id, input) };
-      audit(actor.id, 'ai-codes-created', 'ai-codes', { count: value.items.length, amount: input.amount, days: input.days, note: input.note || '' });
+      audit(actor.id, 'ai-codes-created', 'ai-codes', { count: value.items.length, amount: input.amount, expires: input.expires, note: input.note || '' });
       status = 201;
     }
-    else if (/^\/ai-codes\/[a-f0-9-]{36}\/revoke$/.test(route) && req.method === 'POST' && aiPoints) {
-      const row = aiPoints.revokeCode(route.split('/')[2]);
-      audit(actor.id, 'ai-code-revoked', row.id, { prefix: row.prefix, amount: row.points }); value = { ok: true };
+    else if (/^\/ai-codes\/[a-f0-9-]{36}$/.test(route) && req.method === 'PUT' && aiPoints) {
+      const { row, changed } = aiPoints.updateCode(route.split('/')[2], await jsonBody(req));
+      if (changed.length) audit(actor.id, 'ai-code-updated', row.id, { seq: row.seq, prefix: row.prefix, changed }); value = { ok: true };
     }
     else if (route === '/invitations' && req.method === 'GET') value = { items: invitations.list(actor.id), invitationRequired: invitationPolicy.required() };
     else if (route === '/invitations/settings' && req.method === 'PUT') {

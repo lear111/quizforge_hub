@@ -7,20 +7,26 @@ import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../server.mjs';
 import { authorizeParams, allowedRedirect } from '../connect.mjs';
-import { shanghaiDay, nextShanghaiMidnight, validateCompletion, costFor } from '../official-ai.mjs';
+import { shanghaiDay, nextShanghaiMidnight, validateCompletion } from '../official-ai.mjs';
+import { costFor } from '../official-ai-config.mjs';
 import { createAiPoints, normalizeCode } from '../ai-points.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const challengeOf = verifier => createHash('sha256').update(verifier).digest('base64url');
-const settings = (extra = {}) => ({ enabled: true, baseUrl: 'https://upstream.example/v1', model: 'qwen-vl-plus', key: 'synthetic-upstream-key', pricePerMillion: 10000, monthlyTokens: 1000, ...extra });
+const MASTER = randomBytes(32).toString('base64');
+const settings = { baseUrl: 'https://upstream.example/v1', model: 'qwen-vl-plus', inputPrice: 10000, outputPrice: 10000 };
 // Tests add balance directly (units of 0.0001 yuan); real accounts only get it from redeem codes.
 const grant = (f, user, points) => f.db.prepare('INSERT INTO ai_points VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET balance=excluded.balance').run(f.users[user].id, points, Date.now());
 
-async function fixture(t, { officialAi = settings(), upstream } = {}) {
+// The service is switched on and one upstream key (1 yuan per million tokens) is added, as the admin would.
+async function fixture(t, { enabled = true, upstream } = {}) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'qfh-connect-'));
   const calls = [];
   const fetchImpl = async (url, init) => { calls.push({ url, init, body: JSON.parse(init.body) }); return upstream ? upstream(calls.at(-1)) : new Response(JSON.stringify({ id: 'upstream-id', choices: [{ index: 0, message: { role: 'assistant', content: '{"score":1}' } }], usage: { prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 } }), { status: 200 }); };
-  const app = await createApp({ dataDir, mailProvider: { ready: false }, officialAi, officialAiFetch: fetchImpl });
+  const app = await createApp({ dataDir, mailProvider: { ready: false }, officialAi: settings, officialAiMasterKey: MASTER, officialAiFetch: fetchImpl });
+  app.aiConfig.setEnabled('test', enabled);
+  const { item: key } = await app.aiConfig.addKey({ note: 'test', baseUrl: settings.baseUrl, model: settings.model, apiKey: 'synthetic-upstream-key', inputPrice: 10000, outputPrice: 10000 });
+  calls.length = 0;
   const db = new DatabaseSync(path.join(dataDir, 'hub.sqlite'));
   const users = {};
   for (const name of ['alice', 'bob']) {
@@ -33,7 +39,7 @@ async function fixture(t, { officialAi = settings(), upstream } = {}) {
   const origin = `http://127.0.0.1:${app.server.address().port}`;
   t.after(async () => { await new Promise(resolve => app.server.close(resolve)); db.close(); await rm(dataDir, { recursive: true, force: true }); });
   const request = (pathname, { method = 'GET', body, user, headers = {}, origin: from = origin } = {}) => fetch(origin + pathname, { method, redirect: 'manual', headers: { ...(user ? { Cookie: users[user].cookie } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(method !== 'GET' && from ? { Origin: from } : {}), ...headers }, body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body) });
-  return { app, db, users, request, calls, origin };
+  return { app, db, users, request, calls, origin, keyId: key.id };
 }
 
 function authorizeQuery({ client = 'web', redirectUri = 'http://127.0.0.1:8787/hub/connect/callback', state = randomBytes(24).toString('base64url'), verifier = randomBytes(48).toString('base64url'), name = '书房电脑' } = {}) {
@@ -99,7 +105,7 @@ test('device tokens read their account and quota, and stop working after logout,
   assert.match(first.token, /^qfd_[A-Za-z0-9_-]{43}$/); assert.equal(first.device.name, '书房电脑'); assert.equal(first.user.name, 'alice');
   assert.equal(f.db.prepare('SELECT token FROM connect_devices WHERE id=?').get(first.device.id).token, hash(first.token), 'only the token hash is stored');
   const me = await (await f.request('/api/connect/me', { headers: bearer(first.token) })).json();
-  assert.deepEqual({ user: me.user.name, client: me.device.client, balance: me.ai.balance, pricePerMillion: me.ai.pricePerMillion, enabled: me.ai.enabled }, { user: 'alice', client: 'web', balance: 0, pricePerMillion: 10000, enabled: true });
+  assert.deepEqual({ user: me.user.name, client: me.device.client, balance: me.ai.balance, enabled: me.ai.enabled }, { user: 'alice', client: 'web', balance: 0, enabled: true });
   const reused = await f.request('/api/connect/token', { method: 'POST', origin: null, body: { v: 1, client: 'web', code: first.code, code_verifier: first.flow.verifier, redirect_uri: first.flow.redirectUri } });
   assert.equal(reused.status, 400, 'codes are single-use');
   assert.equal((await f.request('/api/connect/me', { headers: { Cookie: f.users.alice.cookie } })).status, 401, 'a browser session is not a device token');
@@ -133,7 +139,7 @@ test('denying returns access_denied, and an account keeps at most ten devices', 
   assert.equal((await f.request('/api/connect/me', { headers: bearer(tokens.at(-1)) })).status, 200);
 });
 
-test('the gateway forces the model, spends the balance by tokens, charges nothing for upstream failures and stops at the monthly budget', async t => {
+test('the gateway forces the model, spends the balance by tokens, charges nothing for upstream failures and stops at an empty balance', async t => {
   let mode = 'ok';
   const f = await fixture(t, { upstream: () => mode === 'down' ? new Response('{"error":"boom"}', { status: 503 }) : new Response(JSON.stringify({ id: 'upstream-id', choices: [{ index: 0, message: { role: 'assistant', content: '{"score":1}' } }], usage: { total_tokens: 400 } }), { status: 200 }) });
   const { token } = await connectDevice(f);
@@ -152,13 +158,13 @@ test('the gateway forces the model, spends the balance by tokens, charges nothin
   assert.equal(failed.status, 502); assert.equal((await failed.json()).error.code, 'AI_UPSTREAM_FAILED');
   assert.equal(await points(), 6, 'the failed call cost nothing');
   mode = 'ok';
+  assert.equal((await f.app.aiConfig.testKey(f.keyId)).test.ok, true, 'a passing test brings the faulty key back at once');
   assert.equal((await call()).status, 200);
   assert.equal(await points(), 2);
-  assert.equal((await call()).status, 200, 'at 800 of 1000 tokens the budget still admits a call');
+  assert.equal((await call()).status, 200);
   assert.equal(await points(), 0, 'a call that costs more than the balance stops at 0');
   const exhausted = await call();
-  assert.equal(exhausted.status, 503); assert.equal((await exhausted.json()).error.code, 'AI_BUDGET_EXHAUSTED', 'once 1200 tokens are used the month stops');
-  assert.equal((await (await f.request('/api/connect/me', { headers: bearer(token) })).json()).ai.enabled, false);
+  assert.equal(exhausted.status, 402); assert.equal((await exhausted.json()).error.code, 'AI_BALANCE_EXHAUSTED');
   const row = f.db.prepare('SELECT calls,tokens,points FROM official_ai_usage WHERE user_id=?').get(f.users.alice.id);
   assert.deepEqual({ ...row }, { calls: 3, tokens: 1200, points: 10 });
   const columns = f.db.prepare('PRAGMA table_info(official_ai_usage)').all().map(c => c.name);
@@ -166,7 +172,7 @@ test('the gateway forces the model, spends the balance by tokens, charges nothin
 });
 
 test('an empty balance stops grading before the upstream, and malformed or oversized requests are rejected first', async t => {
-  const f = await fixture(t, { officialAi: settings({ monthlyTokens: 1e9 }) });
+  const f = await fixture(t);
   const { token } = await connectDevice(f);
   const call = (body, headers = bearer(token)) => f.request('/api/ai/v1/chat/completions', { method: 'POST', origin: null, headers, body });
   for (const [body, code] of [[completion({ model: 'gpt-4o' }), 'AI_REQUEST_UNSUPPORTED'], [completion({ stream: true }), 'AI_REQUEST_UNSUPPORTED'], [completion({ tools: [] }), 'AI_REQUEST_UNSUPPORTED'], [completion({ max_tokens: 9000 }), 'AI_REQUEST_UNSUPPORTED'], [{ ...completion(), messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.test/a.png' } }] }] }, 'AI_REQUEST_UNSUPPORTED'], [{ ...completion(), messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,' + 'A'.repeat(6 * 1024 * 1024) } }] }] }, 'AI_REQUEST_TOO_LARGE']]) {
@@ -182,16 +188,19 @@ test('an empty balance stops grading before the upstream, and malformed or overs
   grant(f, 'alice', 1);
   assert.equal((await call(completion())).status, 200);
   assert.equal((await call(completion())).status, 402, 'the balance was spent');
-  assert.equal(costFor(0, 30000), 1); assert.equal(costFor(1001, 10000), 11); assert.equal(costFor(1000, 10000), 10);
+  assert.equal(costFor({ total_tokens: 0 }, { inputPrice: 30000, outputPrice: 30000 }), 1, 'at least 0.0001 yuan');
+  assert.equal(costFor({ prompt_tokens: 1000, completion_tokens: 100 }, { inputPrice: 30000, outputPrice: 90000 }), 39, 'input and output at their own prices');
+  assert.equal(costFor({ total_tokens: 1001 }, { inputPrice: 10000, outputPrice: 20000 }), 21, 'without a split every token is charged at the higher price');
 });
 
-test('redeem codes add balance once, are stored as hashes and lock out guessing', async t => {
+test('redeem codes add balance once, are stored hashed and encrypted, and lock out guessing', async t => {
   const f = await fixture(t);
-  const points = createAiPoints({ db: f.db });
-  const [first, second] = points.createCodes(f.users.bob.id, { count: 2, amount: 500000, days: 30, note: '内测' });
+  const points = f.app.aiPoints, month = Date.now() + 30 * 86400000;
+  const [first, second] = points.createCodes(f.users.bob.id, { count: 2, amount: 500000, expires: month, note: '内测' });
   assert.match(first.code, /^AI-[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
   const stored = JSON.stringify(f.db.prepare('SELECT * FROM ai_redeem_codes').all());
-  assert.equal(stored.includes(first.code.slice(3).replaceAll('-', '')), false, 'only the hash is stored');
+  assert.equal(stored.includes(first.code.slice(3).replaceAll('-', '')), false, 'no plain code is stored');
+  assert.equal(points.listCodes().find(item => item.id === first.id).code, first.code, 'administrators can read unused codes');
   assert.equal(normalizeCode(' ' + first.code.toLowerCase().replaceAll('-', ' ') + ' '), first.code.slice(3).replaceAll('-', ''), 'case, spaces and dashes do not matter');
   const { token } = await connectDevice(f);
   const redeem = code => f.request('/api/connect/redeem', { method: 'POST', origin: null, headers: bearer(token), body: { code } });
@@ -200,14 +209,15 @@ test('redeem codes add balance once, are stored as hashes and lock out guessing'
   const again = await redeem(first.code);
   assert.equal(again.status, 400); assert.equal((await again.json()).error.code, 'REDEEM_CODE_INVALID', 'a code works once');
   assert.equal((await (await f.request('/api/connect/me', { headers: bearer(token) })).json()).ai.balance, 500000);
-  assert.equal(points.revokeCode(second.id).id, second.id);
-  assert.equal((await redeem(second.code)).status, 400, 'a revoked code cannot be redeemed');
-  assert.throws(() => points.revokeCode(first.id), { code: 'AI_CODE_REDEEMED' });
+  assert.deepEqual(points.updateCode(second.id, { enabled: false }).changed, ['disabled']);
+  assert.equal((await redeem(second.code)).status, 400, 'a stopped code cannot be redeemed');
+  assert.throws(() => points.updateCode(first.id, { enabled: false }), { code: 'AI_CODE_REDEEMED' });
+  assert.equal(points.listCodes().find(item => item.id === first.id).code, first.code.slice(0, 7) + '-…', 'a redeemed code shows only its prefix');
   assert.equal((await f.request('/api/connect/redeem', { method: 'POST', origin: null, user: 'alice', body: { code: second.code } })).status, 401, 'a browser session cannot redeem for a device');
   // Ten wrong codes in an hour lock the account out of redeeming, even with a valid code.
   const locker = createAiPoints({ db: f.db });
   for (let i = 0; i < 10; i++) assert.throws(() => locker.redeem(f.users.alice.id, 'AI-0000-0000-0000-000' + i), { code: 'REDEEM_CODE_INVALID' });
-  const [third] = locker.createCodes(f.users.bob.id, { count: 1, amount: 100, days: 1 });
+  const [third] = locker.createCodes(f.users.bob.id, { count: 1, amount: 100, expires: month });
   assert.throws(() => locker.redeem(f.users.alice.id, third.code), { code: 'REDEEM_LOCKED' });
   assert.equal(locker.balance(f.users.alice.id), 500000);
   const ledger = f.db.prepare('SELECT delta,kind FROM ai_points_ledger WHERE user_id=?').all(f.users.alice.id).map(row => ({ ...row }));
@@ -215,7 +225,7 @@ test('redeem codes add balance once, are stored as hashes and lock out guessing'
 });
 
 test('turning the feature off hides every endpoint, and Shanghai days reset at local midnight', async t => {
-  const f = await fixture(t, { officialAi: settings({ enabled: false }) });
+  const f = await fixture(t, { enabled: false });
   assert.deepEqual((await (await f.request('/api/config')).json()).officialAi, { enabled: false, protocolVersion: 1 });
   for (const [pathname, method] of [['/connect/authorize?' + authorizeQuery().query, 'GET'], ['/api/connect/token', 'POST'], ['/api/connect/me', 'GET'], ['/api/ai/v1/chat/completions', 'POST']]) {
     const response = await f.request(pathname, { method, origin: null, ...(method === 'POST' ? { body: {} } : {}) });
