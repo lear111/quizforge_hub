@@ -11,7 +11,7 @@ import { encryptKey, decryptKey, masterKey } from '../official-ai-config.mjs';
 const hash = value => createHash('sha256').update(value).digest('hex');
 const MASTER = randomBytes(32).toString('base64');
 const UPSTREAM_KEY = 'sk-synthetic-admin-key-1234';
-const base = (extra = {}) => ({ enabled: false, baseUrl: 'https://upstream.example/v1', model: 'qwen-vl-plus', key: '', tokensPerPoint: 1000, monthlyTokens: 10000000, ...extra });
+const base = (extra = {}) => ({ enabled: false, baseUrl: 'https://upstream.example/v1', model: 'qwen-vl-plus', key: '', pricePerMillion: 30000, monthlyTokens: 10000000, ...extra });
 
 async function fixture(t, { officialAi = base(), master = MASTER } = {}) {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'qfh-admin-ai-'));
@@ -59,7 +59,7 @@ test('only administrators see the settings, and a new key needs the admin passwo
   assert.equal(JSON.stringify(saved.body).includes(UPSTREAM_KEY), false, 'the API never returns the key');
   assert.equal((await readFile(path.join(f.dataDir, 'hub.sqlite'))).includes(Buffer.from(UPSTREAM_KEY)), false, 'the database file holds no plaintext key');
   const audit = f.db.prepare("SELECT detail FROM admin_audit WHERE action='official-ai-updated'").all().map(row => JSON.parse(row.detail).changed);
-  assert.deepEqual(audit, [['enabled', 'model', 'tokensPerPoint', 'monthlyTokens', 'apiKey:replaced']]);
+  assert.deepEqual(audit, [['enabled', 'model', 'pricePerMillion', 'monthlyTokens', 'apiKey:replaced']]);
   assert.equal(JSON.stringify(audit).includes(UPSTREAM_KEY), false);
   assert.equal((await f.save({ upstream: 'https://evil.example/v1' })).status, 400, 'the upstream address cannot be changed here');
 });
@@ -67,20 +67,20 @@ test('only administrators see the settings, and a new key needs the admin passwo
 test('changes apply at once: switch, price and the new key reach the gateway without a restart', async t => {
   const f = await fixture(t);
   assert.equal((await (await f.request('/api/config', { user: null })).json()).officialAi.enabled, false);
-  await f.save({ enabled: true, tokensPerPoint: 5, model: 'qwen-vl-max', apiKey: UPSTREAM_KEY, password: f.users.root.password });
+  await f.save({ enabled: true, pricePerMillion: 500000, model: 'qwen-vl-max', apiKey: UPSTREAM_KEY, password: f.users.root.password });
   assert.equal((await (await f.request('/api/config', { user: null })).json()).officialAi.enabled, true);
   const page = await f.request('/connect/authorize?' + new URLSearchParams({ v: '1', client: 'web', redirect_uri: 'http://127.0.0.1:8787/hub/connect/callback', state: randomBytes(24).toString('base64url'), code_challenge: 'A'.repeat(43), code_challenge_method: 'S256', device_name: 'pc' }), { user: 'alice' });
-  assert.match(await page.text(), /当前剩余 0 点.*qwen-vl-max/s);
+  assert.match(await page.text(), /当前剩余 ¥0\.00.*qwen-vl-max/s);
   // Give alice a device token directly to call the gateway.
   const token = 'qfd_' + randomBytes(32).toString('base64url');
   f.db.prepare('INSERT INTO connect_devices (id,user_id,token,name,client,created,last_used) VALUES (?,?,?,?,?,?,?)').run(randomUUID(), f.users.alice.id, hash(token), 'pc', 'web', new Date().toISOString(), Date.now());
-  f.db.prepare('INSERT INTO ai_points VALUES (?,?,?)').run(f.users.alice.id, 4, Date.now());
+  f.db.prepare('INSERT INTO ai_points VALUES (?,?,?)').run(f.users.alice.id, 10, Date.now());
   const call = () => f.request('/api/ai/v1/chat/completions', { method: 'POST', user: null, headers: { Authorization: 'Bearer ' + token, Origin: '' }, body: { model: 'quizforge-official', messages: [{ role: 'user', content: 'x' }] } });
   assert.equal((await call()).status, 200);
   assert.deepEqual(f.upstream.at(-1), { url: 'https://upstream.example/v1/chat/completions', authorization: 'Bearer ' + UPSTREAM_KEY, model: 'qwen-vl-max' });
-  assert.equal((await call()).status, 200); assert.equal((await call()).status, 402, '10 tokens at 5 per point cost 2 points, so 4 points pay for two gradings');
+  assert.equal((await call()).status, 200); assert.equal((await call()).status, 402, '10 tokens at 50 yuan per million cost 0.0005 yuan, so 0.0010 pays for two gradings');
   const status = await (await f.request('/api/admin/official-ai')).json();
-  assert.deepEqual(status.usage, { todayCalls: 2, todayUsers: 1, todayPoints: 4, monthTokens: 20 });
+  assert.deepEqual(status.usage, { todayCalls: 2, todayUsers: 1, todayCost: 10, monthTokens: 20 });
   await f.save({ enabled: false });
   assert.equal((await call()).status, 404, 'switching off stops the gateway at once');
   await f.save({ clearKey: true, password: f.users.root.password });
@@ -95,25 +95,25 @@ test('a key in the server file wins, and without a master key the backend cannot
   assert.equal((await (await locked.request('/api/admin/official-ai')).json()).encryptionReady, false);
   const refused = await locked.save({ apiKey: UPSTREAM_KEY, password: locked.users.root.password });
   assert.equal(refused.status, 409); assert.equal(refused.body.error.code, 'AI_ENCRYPTION_UNAVAILABLE');
-  assert.equal((await locked.save({ enabled: true, tokensPerPoint: 5 })).status, 200, 'other settings still work without a master key');
+  assert.equal((await locked.save({ enabled: true, pricePerMillion: 5 })).status, 200, 'other settings still work without a master key');
 });
 
 test('administrators generate redeem codes once, see them only as prefixes, and can void unused ones', async t => {
   const f = await fixture(t);
   const create = body => f.request('/api/admin/ai-codes', { method: 'POST', body });
-  assert.equal((await f.request('/api/admin/ai-codes', { method: 'POST', body: { count: 1, points: 10, days: 1 }, user: 'alice' })).status, 403);
-  assert.equal((await create({ count: 0, points: 10, days: 1 })).status, 400);
-  const made = await create({ count: 3, points: 100, days: 30, note: '首批' });
+  assert.equal((await f.request('/api/admin/ai-codes', { method: 'POST', body: { count: 1, amount: 1000, days: 1 }, user: 'alice' })).status, 403);
+  assert.equal((await create({ count: 0, amount: 1000, days: 1 })).status, 400);
+  const made = await create({ count: 3, amount: 1000000, days: 30, note: '首批' });
   assert.equal(made.status, 201);
   const { items } = await made.json();
-  assert.equal(items.length, 3); assert.ok(items.every(item => /^AI-/.test(item.code) && item.points === 100));
+  assert.equal(items.length, 3); assert.ok(items.every(item => /^AI-/.test(item.code) && item.amount === 1000000));
   const listed = await (await f.request('/api/admin/ai-codes')).json();
   assert.equal(JSON.stringify(listed).includes(items[0].code), false, 'the list never shows full codes');
   assert.deepEqual(listed.items.map(item => item.state), ['available', 'available', 'available']);
   assert.equal(listed.items[0].note, '首批');
   assert.equal((await f.request('/api/admin/ai-codes/' + items[0].id + '/revoke', { method: 'POST', body: {} })).status, 200);
   const status = await (await f.request('/api/admin/official-ai')).json();
-  assert.deepEqual(status.points, { outstanding: 0, availableCodes: 2, availableCodePoints: 200 });
+  assert.deepEqual(status.points, { outstanding: 0, availableCodes: 2, availableCodeAmount: 2000000 });
   const audit = f.db.prepare("SELECT action,detail FROM admin_audit WHERE action LIKE 'ai-code%' ORDER BY created").all();
   assert.deepEqual(audit.map(row => row.action), ['ai-codes-created', 'ai-code-revoked']);
   assert.equal(JSON.stringify(audit).includes(items[1].code), false, 'the audit log holds no full code');

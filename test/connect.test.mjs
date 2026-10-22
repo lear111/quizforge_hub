@@ -7,13 +7,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../server.mjs';
 import { authorizeParams, allowedRedirect } from '../connect.mjs';
-import { shanghaiDay, nextShanghaiMidnight, validateCompletion, pointsFor } from '../official-ai.mjs';
+import { shanghaiDay, nextShanghaiMidnight, validateCompletion, costFor } from '../official-ai.mjs';
 import { createAiPoints, normalizeCode } from '../ai-points.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const challengeOf = verifier => createHash('sha256').update(verifier).digest('base64url');
-const settings = (extra = {}) => ({ enabled: true, baseUrl: 'https://upstream.example/v1', model: 'qwen-vl-plus', key: 'synthetic-upstream-key', tokensPerPoint: 100, monthlyTokens: 1000, ...extra });
-// Tests add points directly; real accounts only get them from redeem codes.
+const settings = (extra = {}) => ({ enabled: true, baseUrl: 'https://upstream.example/v1', model: 'qwen-vl-plus', key: 'synthetic-upstream-key', pricePerMillion: 10000, monthlyTokens: 1000, ...extra });
+// Tests add balance directly (units of 0.0001 yuan); real accounts only get it from redeem codes.
 const grant = (f, user, points) => f.db.prepare('INSERT INTO ai_points VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET balance=excluded.balance').run(f.users[user].id, points, Date.now());
 
 async function fixture(t, { officialAi = settings(), upstream } = {}) {
@@ -78,7 +78,7 @@ test('a logged-out browser goes to login first, then a consent page; allowing is
   const request = /^\/manage\/#connect-login\/([a-f0-9]{64})$/.exec(anonymous.headers.get('location'))[1];
   const page = await f.request('/connect/authorize?request=' + request, { user: 'alice' });
   const html = await page.text();
-  assert.equal(page.status, 200); assert.match(html, /&lt;script&gt;书房&lt;\/script&gt;/); assert.doesNotMatch(html, /<script>书房/); assert.match(html, /当前剩余 0 点/);
+  assert.equal(page.status, 200); assert.match(html, /&lt;script&gt;书房&lt;\/script&gt;/); assert.doesNotMatch(html, /<script>书房/); assert.match(html, /当前剩余 ¥0\.00/);
   assert.equal((await f.request('/connect/authorize?v=1&client=web', { user: 'alice' })).status, 400);
   const noOrigin = await f.request('/api/connect/authorize', { method: 'POST', user: 'alice', origin: null, body: { request, decision: 'allow' } });
   assert.equal(noOrigin.status, 403, 'the consent decision keeps the same-origin check');
@@ -99,7 +99,7 @@ test('device tokens read their account and quota, and stop working after logout,
   assert.match(first.token, /^qfd_[A-Za-z0-9_-]{43}$/); assert.equal(first.device.name, '书房电脑'); assert.equal(first.user.name, 'alice');
   assert.equal(f.db.prepare('SELECT token FROM connect_devices WHERE id=?').get(first.device.id).token, hash(first.token), 'only the token hash is stored');
   const me = await (await f.request('/api/connect/me', { headers: bearer(first.token) })).json();
-  assert.deepEqual({ user: me.user.name, client: me.device.client, points: me.ai.points, tokensPerPoint: me.ai.tokensPerPoint, enabled: me.ai.enabled }, { user: 'alice', client: 'web', points: 0, tokensPerPoint: 100, enabled: true });
+  assert.deepEqual({ user: me.user.name, client: me.device.client, balance: me.ai.balance, pricePerMillion: me.ai.pricePerMillion, enabled: me.ai.enabled }, { user: 'alice', client: 'web', balance: 0, pricePerMillion: 10000, enabled: true });
   const reused = await f.request('/api/connect/token', { method: 'POST', origin: null, body: { v: 1, client: 'web', code: first.code, code_verifier: first.flow.verifier, redirect_uri: first.flow.redirectUri } });
   assert.equal(reused.status, 400, 'codes are single-use');
   assert.equal((await f.request('/api/connect/me', { headers: { Cookie: f.users.alice.cookie } })).status, 401, 'a browser session is not a device token');
@@ -133,17 +133,17 @@ test('denying returns access_denied, and an account keeps at most ten devices', 
   assert.equal((await f.request('/api/connect/me', { headers: bearer(tokens.at(-1)) })).status, 200);
 });
 
-test('the gateway forces the model, spends points by tokens, charges nothing for upstream failures and stops at the monthly budget', async t => {
+test('the gateway forces the model, spends the balance by tokens, charges nothing for upstream failures and stops at the monthly budget', async t => {
   let mode = 'ok';
   const f = await fixture(t, { upstream: () => mode === 'down' ? new Response('{"error":"boom"}', { status: 503 }) : new Response(JSON.stringify({ id: 'upstream-id', choices: [{ index: 0, message: { role: 'assistant', content: '{"score":1}' } }], usage: { total_tokens: 400 } }), { status: 200 }) });
   const { token } = await connectDevice(f);
   grant(f, 'alice', 10);
   const call = (body = completion(), headers = bearer(token)) => f.request('/api/ai/v1/chat/completions', { method: 'POST', origin: null, headers, body });
-  const points = async () => (await (await f.request('/api/connect/me', { headers: bearer(token) })).json()).ai.points;
+  const points = async () => (await (await f.request('/api/connect/me', { headers: bearer(token) })).json()).ai.balance;
   const ok = await call();
   const result = await ok.json();
   assert.equal(ok.status, 200); assert.equal(result.model, 'quizforge-official'); assert.equal(result.choices[0].message.content, '{"score":1}'); assert.notEqual(result.id, 'upstream-id');
-  assert.deepEqual(result.quizforge, { pointsSpent: 4, points: 6 }, '400 tokens at 100 per point');
+  assert.deepEqual(result.quizforge, { cost: 4, balance: 6 }, '400 tokens at 1 yuan per million');
   const sent = f.calls[0];
   assert.equal(sent.url, 'https://upstream.example/v1/chat/completions'); assert.equal(sent.init.headers.Authorization, 'Bearer synthetic-upstream-key'); assert.equal(sent.init.redirect, 'error');
   assert.equal(sent.body.model, 'qwen-vl-plus'); assert.equal(sent.body.max_tokens, 8192); assert.deepEqual(sent.body.response_format, { type: 'json_object' });
@@ -177,18 +177,18 @@ test('an empty balance stops grading before the upstream, and malformed or overs
   assert.equal((await call(completion(), bearer('qfd_' + 'x'.repeat(43)))).status, 401);
   assert.equal(f.calls.length, 0, 'nothing invalid reached the upstream');
   const empty = await call(completion());
-  assert.equal(empty.status, 402); assert.equal((await empty.json()).error.code, 'AI_POINTS_EXHAUSTED');
+  assert.equal(empty.status, 402); assert.equal((await empty.json()).error.code, 'AI_BALANCE_EXHAUSTED');
   assert.equal(f.calls.length, 0, 'a new account has no points and nothing reaches the upstream');
   grant(f, 'alice', 1);
   assert.equal((await call(completion())).status, 200);
-  assert.equal((await call(completion())).status, 402, 'the single point was spent');
-  assert.equal(pointsFor(0, 1000), 1); assert.equal(pointsFor(1001, 1000), 2); assert.equal(pointsFor(1000, 1000), 1);
+  assert.equal((await call(completion())).status, 402, 'the balance was spent');
+  assert.equal(costFor(0, 30000), 1); assert.equal(costFor(1001, 10000), 11); assert.equal(costFor(1000, 10000), 10);
 });
 
-test('redeem codes add points once, are stored as hashes and lock out guessing', async t => {
+test('redeem codes add balance once, are stored as hashes and lock out guessing', async t => {
   const f = await fixture(t);
   const points = createAiPoints({ db: f.db });
-  const [first, second] = points.createCodes(f.users.bob.id, { count: 2, points: 50, days: 30, note: '内测' });
+  const [first, second] = points.createCodes(f.users.bob.id, { count: 2, amount: 500000, days: 30, note: '内测' });
   assert.match(first.code, /^AI-[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
   const stored = JSON.stringify(f.db.prepare('SELECT * FROM ai_redeem_codes').all());
   assert.equal(stored.includes(first.code.slice(3).replaceAll('-', '')), false, 'only the hash is stored');
@@ -196,10 +196,10 @@ test('redeem codes add points once, are stored as hashes and lock out guessing',
   const { token } = await connectDevice(f);
   const redeem = code => f.request('/api/connect/redeem', { method: 'POST', origin: null, headers: bearer(token), body: { code } });
   const ok = await redeem(first.code);
-  assert.equal(ok.status, 200); assert.deepEqual(await ok.json(), { added: 50, points: 50 });
+  assert.equal(ok.status, 200); assert.deepEqual(await ok.json(), { added: 500000, balance: 500000 });
   const again = await redeem(first.code);
   assert.equal(again.status, 400); assert.equal((await again.json()).error.code, 'REDEEM_CODE_INVALID', 'a code works once');
-  assert.equal((await (await f.request('/api/connect/me', { headers: bearer(token) })).json()).ai.points, 50);
+  assert.equal((await (await f.request('/api/connect/me', { headers: bearer(token) })).json()).ai.balance, 500000);
   assert.equal(points.revokeCode(second.id).id, second.id);
   assert.equal((await redeem(second.code)).status, 400, 'a revoked code cannot be redeemed');
   assert.throws(() => points.revokeCode(first.id), { code: 'AI_CODE_REDEEMED' });
@@ -207,11 +207,11 @@ test('redeem codes add points once, are stored as hashes and lock out guessing',
   // Ten wrong codes in an hour lock the account out of redeeming, even with a valid code.
   const locker = createAiPoints({ db: f.db });
   for (let i = 0; i < 10; i++) assert.throws(() => locker.redeem(f.users.alice.id, 'AI-0000-0000-0000-000' + i), { code: 'REDEEM_CODE_INVALID' });
-  const [third] = locker.createCodes(f.users.bob.id, { count: 1, points: 5, days: 1 });
+  const [third] = locker.createCodes(f.users.bob.id, { count: 1, amount: 100, days: 1 });
   assert.throws(() => locker.redeem(f.users.alice.id, third.code), { code: 'REDEEM_LOCKED' });
-  assert.equal(locker.balance(f.users.alice.id), 50);
+  assert.equal(locker.balance(f.users.alice.id), 500000);
   const ledger = f.db.prepare('SELECT delta,kind FROM ai_points_ledger WHERE user_id=?').all(f.users.alice.id).map(row => ({ ...row }));
-  assert.deepEqual(ledger, [{ delta: 50, kind: 'redeem' }]);
+  assert.deepEqual(ledger, [{ delta: 500000, kind: 'redeem' }]);
 });
 
 test('turning the feature off hides every endpoint, and Shanghai days reset at local midnight', async t => {

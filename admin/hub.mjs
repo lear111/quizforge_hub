@@ -62,12 +62,12 @@ export function createHubAdmin({ db, invitations, invitationPolicy, metrics, req
       throttle(req, 'admin-ai-codes', 10, actor.id);
       const input = await jsonBody(req);
       value = { items: aiPoints.createCodes(actor.id, input) };
-      audit(actor.id, 'ai-codes-created', 'ai-codes', { count: value.items.length, points: input.points, days: input.days, note: input.note || '' });
+      audit(actor.id, 'ai-codes-created', 'ai-codes', { count: value.items.length, amount: input.amount, days: input.days, note: input.note || '' });
       status = 201;
     }
     else if (/^\/ai-codes\/[a-f0-9-]{36}\/revoke$/.test(route) && req.method === 'POST' && aiPoints) {
       const row = aiPoints.revokeCode(route.split('/')[2]);
-      audit(actor.id, 'ai-code-revoked', row.id, { prefix: row.prefix, points: row.points }); value = { ok: true };
+      audit(actor.id, 'ai-code-revoked', row.id, { prefix: row.prefix, amount: row.points }); value = { ok: true };
     }
     else if (route === '/invitations' && req.method === 'GET') value = { items: invitations.list(actor.id), invitationRequired: invitationPolicy.required() };
     else if (route === '/invitations/settings' && req.method === 'PUT') {

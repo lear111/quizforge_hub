@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { ConnectError } from './connect.mjs';
 
 // Official AI gateway (docs/HUB_CONNECT_AI.md section 6). The upstream key stays
-// here. Each grading spends the account's AI points by the tokens it used. Only
-// counts, token totals and points are stored; request and response content is
+// here. Each grading spends the account's balance by the tokens it used. Only
+// counts, token totals and amounts are stored; request and response content is
 // never written to the database or logs.
 const MiB = 1024 * 1024;
 const FIELDS = new Set(['model', 'messages', 'max_tokens', 'response_format', 'temperature']);
@@ -17,7 +17,8 @@ export function officialAiSettings(env = process.env) {
     baseUrl: (env.OFFICIAL_AI_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/+$/, ''),
     model: env.OFFICIAL_AI_MODEL || 'qwen-vl-plus',
     key: env.OFFICIAL_AI_KEY || '',
-    tokensPerPoint: Number(env.OFFICIAL_AI_TOKENS_PER_POINT || 1000),
+    // Yuan per million tokens, stored in units of 0.0001 yuan.
+    pricePerMillion: Math.round(Number(env.OFFICIAL_AI_PRICE_PER_MILLION || 3) * 10000),
     monthlyTokens: Number(env.OFFICIAL_AI_MONTHLY_TOKENS || 10000000),
   };
 }
@@ -53,8 +54,8 @@ export function validateCompletion(body) {
   return { messages: body.messages, max_tokens: body.max_tokens ?? 8192, ...(Object.hasOwn(body, 'temperature') ? { temperature: body.temperature } : {}), ...(body.response_format ? { response_format: body.response_format } : {}) };
 }
 
-// A successful grading costs at least 1 point; tokens round up to whole points.
-export const pointsFor = (tokens, tokensPerPoint) => Math.max(1, Math.ceil(tokens / tokensPerPoint));
+// A successful grading costs tokens x price, rounded up to 0.0001 yuan and at least that.
+export const costFor = (tokens, pricePerMillion) => Math.max(1, Math.ceil(tokens * pricePerMillion / 1e6));
 
 export function createOfficialAi({ db, settings: source, connect, points, json, readBody, now = () => Date.now(), fetchImpl = globalThis.fetch, timeoutMs = 90000, siteConcurrency = 8 }) {
   db.exec(`CREATE TABLE IF NOT EXISTS official_ai_usage (user_id TEXT NOT NULL REFERENCES users(id), day TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day));
@@ -67,7 +68,7 @@ export function createOfficialAi({ db, settings: source, connect, points, json, 
   const usedTokens = time => db.prepare('SELECT tokens FROM official_ai_budget WHERE period=?').get(month(time))?.tokens || 0;
   const usage = userId => {
     const settings = read();
-    return { enabled: settings.enabled && !!settings.key && usedTokens(now()) < settings.monthlyTokens, model: '通义千问 ' + settings.model, vision: true, points: points.balance(userId), tokensPerPoint: settings.tokensPerPoint };
+    return { enabled: settings.enabled && !!settings.key && usedTokens(now()) < settings.monthlyTokens, model: '通义千问 ' + settings.model, vision: true, balance: points.balance(userId), pricePerMillion: settings.pricePerMillion };
   };
   connect.setUsage(usage);
 
@@ -90,7 +91,7 @@ export function createOfficialAi({ db, settings: source, connect, points, json, 
     const time = now(), day = shanghaiDay(time);
     if (usedTokens(time) >= settings.monthlyTokens) fail(503, 'AI_BUDGET_EXHAUSTED', '本月免费 AI 服务的总量已用完，下月恢复，也可以在 AI 设置中改用自己的模型');
     // Points are only spent after the model answers, so failures cost nothing.
-    if (points.balance(userId) < 1) fail(402, 'AI_POINTS_EXHAUSTED', '免费 AI 额度已用完，可以在设置 → 用户中心输入兑换码获取额度，也可以改用自己的模型。', { points: 0 });
+    if (points.balance(userId) < 1) fail(402, 'AI_BALANCE_EXHAUSTED', '免费 AI 额度已用完，可以在设置 → 用户中心输入兑换码获取额度，也可以改用自己的模型。', { balance: 0 });
     active.set(userId, (active.get(userId) || 0) + 1);
     let upstream;
     try {
@@ -110,10 +111,10 @@ export function createOfficialAi({ db, settings: source, connect, points, json, 
       const left = (active.get(userId) || 1) - 1; if (left) active.set(userId, left); else active.delete(userId);
     }
     const tokens = Number.isSafeInteger(upstream.usage?.total_tokens) && upstream.usage.total_tokens > 0 ? upstream.usage.total_tokens : 0;
-    const spent = points.charge(userId, pointsFor(tokens, settings.tokensPerPoint));
+    const spent = points.charge(userId, costFor(tokens, settings.pricePerMillion));
     db.prepare('INSERT INTO official_ai_usage (user_id,day,calls,tokens,points) VALUES (?,?,1,?,?) ON CONFLICT(user_id,day) DO UPDATE SET calls=calls+1,tokens=tokens+excluded.tokens,points=points+excluded.points').run(userId, day, tokens, spent);
     if (tokens) db.prepare('INSERT INTO official_ai_budget VALUES (?,?) ON CONFLICT(period) DO UPDATE SET tokens=tokens+excluded.tokens').run(month(time), tokens);
-    json(res, 200, { id: 'qf-' + randomUUID(), object: 'chat.completion', model: 'quizforge-official', choices: upstream.choices, ...(upstream.usage ? { usage: upstream.usage } : {}), quizforge: { pointsSpent: spent, points: points.balance(userId) } });
+    json(res, 200, { id: 'qf-' + randomUUID(), object: 'chat.completion', model: 'quizforge-official', choices: upstream.choices, ...(upstream.usage ? { usage: upstream.usage } : {}), quizforge: { cost: spent, balance: points.balance(userId) } });
     return true;
   }
   return { handle, usage };

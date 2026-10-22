@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
+import { yuan } from './ai-points.mjs';
 
 // Hub account connection for local Web and Android clients (docs/HUB_CONNECT_AI.md).
 // Authorization code + PKCE (RFC 8252 / RFC 7636); device tokens only reach the
@@ -65,7 +66,7 @@ export function createConnect({ db, enabled, identity, throttle, json, bodyJson,
 
   function consentPage(request, entry, user) {
     const client = entry.client === 'web' ? '电脑上的 QuizForge' : 'Android 上的 QuizForge';
-    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>连接设备 · QuizForge</title><link rel="icon" type="image/png" href="/quizforge-icon.png"><link rel="stylesheet" href="/styles.css"><script type="module" src="/connect.js"></script></head><body><main id="app" class="connect-page"><section class="panel connect-panel" data-request="${esc(request)}"><h1>允许这台设备使用免费 AI 评分？</h1><dl class="connect-facts"><dt>设备</dt><dd>${esc(entry.deviceName)}（${client}）</dd><dt>账号</dt><dd>${esc(user.name)}</dd><dt>权限</dt><dd>使用免费 AI 评分，消耗你账号里的 AI 额度（当前剩余 ${points.balance(user.id)} 点），并可以为账号兑换额度。设备不能访问你的题库、评论或账号设置。</dd></dl><p class="connect-note">评分时，题目、答案和图片会经由 QuizForge 服务器发送给模型服务商（${esc(live(modelLabel))}），服务器不保存这些内容。你可以随时在“我的分享”页撤销这台设备。</p><div class="connect-actions"><button class="button" data-decision="allow">允许</button><button class="text-button" data-decision="deny">拒绝</button></div><p class="form-error" role="alert"></p></section></main></body></html>`;
+    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>连接设备 · QuizForge</title><link rel="icon" type="image/png" href="/quizforge-icon.png"><link rel="stylesheet" href="/styles.css"><script type="module" src="/connect.js"></script></head><body><main id="app" class="connect-page"><section class="panel connect-panel" data-request="${esc(request)}"><h1>允许这台设备使用免费 AI 评分？</h1><dl class="connect-facts"><dt>设备</dt><dd>${esc(entry.deviceName)}（${client}）</dd><dt>账号</dt><dd>${esc(user.name)}</dd><dt>权限</dt><dd>使用免费 AI 评分，消耗你账号里的 AI 额度（当前剩余 ¥${yuan(points.balance(user.id))}），并可以为账号兑换额度。设备不能访问你的题库、评论或账号设置。</dd></dl><p class="connect-note">评分时，题目、答案和图片会经由 QuizForge 服务器发送给模型服务商（${esc(live(modelLabel))}），服务器不保存这些内容。你可以随时在“我的分享”页撤销这台设备。</p><div class="connect-actions"><button class="button" data-decision="allow">允许</button><button class="text-button" data-decision="deny">拒绝</button></div><p class="form-error" role="alert"></p></section></main></body></html>`;
   }
 
   async function handle(req, res, url) {
