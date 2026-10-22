@@ -20,6 +20,8 @@ import { ActivityMetrics } from './admin/metrics.mjs';
 import { createHubAdmin } from './admin/hub.mjs';
 import { createAdminClient } from './admin/bridge.mjs';
 import { ReviewPackages } from './admin/review-packages.mjs';
+import { createConnect, ConnectError } from './connect.mjs';
+import { createOfficialAi, officialAiSettings } from './official-ai.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
@@ -265,6 +267,13 @@ export async function createApp(options = {}) {
   const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack: options.resolveCloudPack || resolveCloudPack, reserveTraffic });
   const handleLocalImport = createLocalImport({ db, uploadDir, enabled: localImportEnabled, throttle, reserveTraffic, json, openFile: options.localImportOpenFile });
   const handleAdmin = createHubAdmin({ db, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
+  // Hub account connection and the official AI gateway (docs/HUB_CONNECT_AI.md).
+  const aiSettings = options.officialAi ?? officialAiSettings();
+  const connect = createConnect({ db, enabled: aiSettings.enabled, identity, throttle, json, bodyJson, dailyLimit: aiSettings.dailyLimit, modelLabel: '通义千问 ' + aiSettings.model, now: options.now });
+  const officialAi = createOfficialAi({ db, settings: aiSettings, connect, json, readBody, now: options.now, fetchImpl: options.officialAiFetch });
+  // These device endpoints authenticate only with a Bearer device token and never
+  // read cookies, so native clients may call them without a browser Origin.
+  const deviceRoutes = new Set(['/api/connect/token', '/api/connect/logout', '/api/ai/v1/chat/completions']);
   const server = http.createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
@@ -287,7 +296,7 @@ export async function createApp(options = {}) {
       // Only this document may directly connect to user-selected HTTPS models.
       if (cloudEnabled && pathname.startsWith('/cloud/')) res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; frame-src 'none'; style-src 'self'; img-src 'self'; connect-src 'self' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
       if (pathname.startsWith('/admin/')) res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; frame-src 'none'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
-      if (!['GET', 'HEAD'].includes(req.method)) {
+      if (!['GET', 'HEAD'].includes(req.method) && !deviceRoutes.has(pathname)) {
         const allowed = publicOrigin || `http://${req.headers.host}`;
         if (req.headers.origin !== allowed) fail(403, '请求来源不受信任');
       }
@@ -336,7 +345,9 @@ export async function createApp(options = {}) {
         res.writeHead(result.status, { 'Content-Type': result.type, 'Content-Length': result.bytes.length, 'Cache-Control': 'no-store' }); res.end(result.bytes); return;
       }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
-      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, invitationRequired: invitationPolicy.required(), turnstileSiteKey: emailCodes.siteKey, cloudEnabled, practiceOrigin, adminEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' } }); return; }
+      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, invitationRequired: invitationPolicy.required(), turnstileSiteKey: emailCodes.siteKey, cloudEnabled, practiceOrigin, adminEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' }, officialAi: { enabled: aiSettings.enabled, protocolVersion: 1 } }); return; }
+      if (await connect.handle(req, res, url)) return;
+      if (await officialAi.handle(req, res, url)) return;
       if (await handleAdmin(req, res, url)) return;
       if (await handleLocalImport(req, res, url)) return;
       if (await handleCloud(req, res, url)) return;
@@ -491,6 +502,7 @@ export async function createApp(options = {}) {
       if (['GET', 'HEAD'].includes(req.method) && !pathname.startsWith('/api/')) {
         const assets = { '/app.js': ['app.js', 'text/javascript'], '/local-import.js': ['local-import.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
         assets['/activity.js'] = ['activity.js', 'text/javascript'];
+        if (aiSettings.enabled) assets['/connect.js'] = ['connect.js', 'text/javascript'];
         if (adminEnabled) {
           if (pathname === '/admin/') { if (!identity(req)) { res.writeHead(303, { Location: '/manage/#admin', 'Cache-Control': 'no-store' }).end(); return; } requireAdmin(req); }
           assets['/admin/'] = ['admin/index.html', 'text/html']; assets['/admin/app.js'] = ['admin/app.js', 'text/javascript']; assets['/admin/admin.css'] = ['admin/admin.css', 'text/css'];
@@ -518,6 +530,7 @@ export async function createApp(options = {}) {
       fail(404, '页面不存在');
     } catch (e) {
       if (res.headersSent) { res.destroy(); return; }
+      if (e instanceof ConnectError) { json(res, e.status, { error: { code: e.code, message: e.message, ...e.extra } }); return; }
       const status = e instanceof ApiError || e instanceof EmailCodeError || e instanceof InvitationError || e instanceof CloudError ? e.status : e.code === 'ENOENT' ? 404 : 500;
       if (status === 500) console.error('Request failed:', e.name, e.code || 'internal');
       const message = status === 500 ? '服务器暂时无法处理，请稍后重试' : status === 404 && !(e instanceof ApiError) ? '文件不存在' : e.message;

@@ -2,7 +2,7 @@ import { enhanceLocalImport } from './local-import.js';
 import { bindActivity } from './activity.js';
 let localImport = null;
 const $ = selector => document.querySelector(selector);
-let cloudEnabled = false, practiceOrigin = '', invitationRequired = false, adminEnabled = false;
+let cloudEnabled = false, practiceOrigin = '', invitationRequired = false, adminEnabled = false, officialAiEnabled = false;
 const app = $('#app');
 const icons = { plus: '<path d="M12 5v14M5 12h14"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>', grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>', book: '<path d="M12 5c-3-2-6-2-9-1v15c3-1 6-1 9 1 3-2 6-2 9-1V4c-3-1-6-1-9 1v15"/>', award: '<circle cx="12" cy="9" r="6"/><path d="m8 14-2 7 6-3 6 3-2-7"/>', code: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6m-3-14-2 16"/>', globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>', folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l3 4h6a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>', download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>', chat: '<path d="M21 11a9 9 0 0 1-9 9H3l2-5a9 9 0 1 1 16-4z"/>', upload: '<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>', image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="2"/><path d="m21 16-5-5-8 10"/>', check: '<path d="m5 12 4 4L19 6"/>', arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>', edit: '<path d="m16 3 5 5-12 12-6 1 1-6L16 3zM14 5l5 5"/>' };
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.book}</svg>`;
@@ -14,8 +14,12 @@ const tagList = tags => `<div class="tags">${tags.map(v => `<span class="tag">${
 let user = null, maxArchiveMB = 20, turn = 0, toastTimer, authTarget = null;
 function practiceAuthorization(target) {
   const request = /^#practice-login\/([a-f0-9]{64})$/.exec(target || '')?.[1];
-  return request ? '/practice-auth/authorize?request=' + request : null;
+  if (request) return '/practice-auth/authorize?request=' + request;
+  // Connecting a local QuizForge app returns to its consent page after login.
+  const connect = /^#connect-login\/([a-f0-9]{64})$/.exec(target || '')?.[1];
+  return connect ? '/connect/authorize?request=' + connect : null;
 }
+const connectLogin = target => /^#connect-login\//.test(target || '');
 let filters = { q: '', sort: 'latest', page: 1 };
 let reviewFilter = 'pending';
 let currentPack = null, upload = null, previewUrls = [];
@@ -75,7 +79,7 @@ async function sendEmailCode() {
 async function api(url, options = {}) {
   const response = await fetch(url, options);
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || '请求失败，请稍后重试');
+  if (!response.ok) throw new Error(result.error?.message || result.error || '请求失败，请稍后重试');
   return result;
 }
 const jsonOptions = (body, method = 'POST') => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -117,6 +121,14 @@ async function library(mine, stamp) {
   if (stamp !== turn) return;
   app.innerHTML = `<div class="listing-header"><h1>${mine ? '我的分享' : '题库分享'}</h1><p>${mine ? '查看审核状态、修改题库并重新提交。' : '浏览题库介绍与截图，下载压缩包，和作者交流。'}</p></div>
   <section class="library-single"><div class="library-top"><form class="search" id="search-form">${icon('search')}<input name="q" value="${esc(filters.q)}" placeholder="搜索题库名称、简介或标签" aria-label="搜索题库"><button class="search-submit" type="submit">搜索</button></form><span class="listing-count">${filters.q ? '找到' : '共'} ${result.count} 份题库</span><select class="sort" id="sort" aria-label="题库排序"><option value="latest" ${filters.sort === 'latest' ? 'selected' : ''}>最近更新</option><option value="popular" ${filters.sort === 'popular' ? 'selected' : ''}>最多下载</option></select></div>${filters.q ? `<div class="search-result-note">搜索“${esc(filters.q)}”<button class="text-button" data-action="reset-search">清除搜索 ×</button></div>` : ''}<div class="cards">${result.packs.length ? result.packs.map(card).join('') : filters.q ? empty('没有找到匹配的题库', '换个关键词试试。', '<button class="button small secondary" data-action="reset-search">清除搜索</button>') : empty(mine ? '你还没有上传题库' : '还没有题库', '上传压缩包，填写简介，也可以添加截图。', '<a class="button small" href="#upload">' + icon('plus') + '上传题库</a>')}</div>${result.count > 12 ? `<div class="pagination"><button class="button small secondary" data-page="${result.page - 1}" ${result.page === 1 ? 'disabled' : ''}>上一页</button><span>${result.page} / ${Math.ceil(result.count / 12)}</span><button class="button small secondary" data-page="${result.page + 1}" ${result.page * 12 >= result.count ? 'disabled' : ''}>下一页</button></div>` : ''}</section>`;
+}
+// Local QuizForge apps connected for official AI grading (docs/HUB_CONNECT_AI.md 5).
+async function devices(stamp) {
+  const result = await api('/api/connect/devices');
+  if (stamp !== turn) return;
+  const client = value => value === 'web' ? '电脑' : 'Android';
+  const rows = result.devices.map(d => `<li class="device-row"><div><strong>${esc(d.name)}</strong><span>${client(d.client)} · 连接于 ${date(d.created)}${d.lastUsed ? ' · 最近使用 ' + date(d.lastUsed) : ''}</span></div><button class="text-button" data-revoke-device="${esc(d.id)}">撤销</button></li>`).join('');
+  app.insertAdjacentHTML('beforeend', `<section class="panel devices-panel" aria-labelledby="devices-title"><h2 id="devices-title">已连接设备</h2><p>这些 QuizForge 设备可以使用你的官方 AI 评分额度。撤销后，该设备需要重新登录。</p>${rows ? `<ul class="device-list">${rows}</ul>` : '<p class="devices-empty">还没有连接的设备。</p>'}</section>`);
 }
 async function detail(id, stamp) {
   const result = await api('/api/packs/' + id);
@@ -160,7 +172,7 @@ function showAuth(mode = 'login', target = null) {
   authTarget = target;
   $('#auth-content').innerHTML = `<h2 id="auth-title">${mode === 'register' ? '欢迎加入题库广场' : '欢迎回来'}</h2><p class="dialog-intro">登录后，分享你的题库，与同路人交流。</p><div class="auth-tabs"><button class="${mode === 'login' ? 'active' : ''}" data-auth-mode="login">登录</button><button class="${mode === 'register' ? 'active' : ''}" data-auth-mode="register">注册账号</button></div><form id="auth-form" data-mode="${mode}">${mode === 'register' ? '<div class="field"><label for="auth-name">昵称</label><input id="auth-name" name="name" required maxlength="30" autocomplete="nickname" placeholder="大家会看到这个名字"></div>' : ''}<div class="field"><label for="auth-email">邮箱</label><input id="auth-email" name="email" type="email" required maxlength="180" autocomplete="email" placeholder="you@example.com"></div><div class="field"><label for="auth-password">密码</label><input id="auth-password" name="password" type="password" required minlength="10" maxlength="128" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}" placeholder="至少 10 个字符"></div><p class="form-error" role="alert"></p><button type="submit" class="button">${mode === 'register' ? '注册并登录' : '登录'}</button><p class="auth-note">邮箱仅用于账号登录，不会展示在题库和评论中。当前版本暂不支持邮箱验证和自助密码找回。</p></form>`;
   if (!$('#auth-dialog').open) $('#auth-dialog').showModal();
-  if (practiceAuthorization(target)) $('#auth-content .dialog-intro').textContent = '与题库广场共用同一个账号，登录或注册后自动返回云端练习。';
+  if (practiceAuthorization(target)) $('#auth-content .dialog-intro').textContent = connectLogin(target) ? '登录或注册后，返回确认是否允许这台设备使用官方 AI 评分。' : '与题库广场共用同一个账号，登录或注册后自动返回云端练习。';
   if (mode === 'register') {
     const passwordField = $('#auth-password').closest('.field');
     if (invitationRequired) {
@@ -184,7 +196,7 @@ async function render() {
   if (authorization) {
     document.title = '登录 · QuizForge Hub';
     if (user) { location.replace(authorization); return; }
-    app.innerHTML = empty('登录后开始练习', '练习页与题库广场共用同一个账号，完成登录或注册后将自动返回练习页。', '<button class="button" data-action="login">登录 / 注册</button>');
+    app.innerHTML = connectLogin(location.hash) ? empty('登录后连接设备', '登录或注册后，返回确认是否允许 QuizForge 使用官方 AI 评分。', '<button class="button" data-action="login">登录 / 注册</button>') : empty('登录后开始练习', '练习页与题库广场共用同一个账号，完成登录或注册后将自动返回练习页。', '<button class="button" data-action="login">登录 / 注册</button>');
     showAuth('login', location.hash); return;
   }
   if (view === 'admin') { if (user?.admin) { location.assign('/admin/'); return; } app.innerHTML = empty('管理员登录', '请使用管理员账号进入管理后台。', '<button class="button" data-action="login">登录</button>'); if (!user) showAuth('login', '#admin'); return; }
@@ -201,7 +213,7 @@ async function render() {
     else if (view === 'upload') uploadForm(null);
     else if (view === 'reviews') await reviews(stamp);
     else if (view === 'reports') await reports(stamp);
-    else await library(view === 'mine', stamp);
+    else { await library(view === 'mine', stamp); if (view === 'mine' && officialAiEnabled && stamp === turn) await devices(stamp); }
   } catch (error) { if (stamp === turn) app.innerHTML = empty('暂时无法打开', esc(error.message), '<button class="button small" data-action="retry">重试</button><a href="#library" class="text-button">返回广场</a>'); }
 }
 
@@ -215,6 +227,7 @@ document.addEventListener('click', async event => {
     if (element.dataset.removeExisting) { upload.keep = upload.keep.filter(id => id !== element.dataset.removeExisting); previews(); return; }
     if (element.hasAttribute('data-remove-picture')) { upload.pictures.splice(Number(element.dataset.removePicture), 1); previews(); return; }
     if (element.dataset.deleteComment) { message('删除这条评论？', `<p class="dialog-intro">删除后无法恢复。</p><button class="button" data-confirm-comment="${element.dataset.deleteComment}">确认删除</button>`); return; }
+    if (element.dataset.revokeDevice) { await api('/api/connect/devices/' + element.dataset.revokeDevice, { method: 'DELETE' }); toast('已撤销该设备'); await render(); return; }
     if (element.dataset.confirmComment) { await api('/api/comments/' + element.dataset.confirmComment, { method: 'DELETE' }); $('#message-dialog').close(); toast('评论已删除'); await render(); return; }
     const action = element.dataset.action;
     // Cross-origin cloud import is a real navigation link, including modified
@@ -299,6 +312,6 @@ document.addEventListener('submit', async event => {
 window.addEventListener('hashchange', () => { document.querySelectorAll('dialog[open]').forEach(d => d.close()); window.scrollTo(0, 0); render(); });
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', event => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } });
 $('#auth-dialog').addEventListener('close', clearCaptcha);
-try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; cloudEnabled = config.cloudEnabled; practiceOrigin = config.practiceOrigin || ''; invitationRequired = !!config.invitationRequired; adminEnabled = !!config.adminEnabled; } catch (error) { toast(error.message); }
+try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; cloudEnabled = config.cloudEnabled; practiceOrigin = config.practiceOrigin || ''; invitationRequired = !!config.invitationRequired; adminEnabled = !!config.adminEnabled; officialAiEnabled = !!config.officialAi?.enabled; } catch (error) { toast(error.message); }
 account(); await render(); cloudDownloadButton();
 new MutationObserver(cloudDownloadButton).observe(app, { childList: true, subtree: true });
