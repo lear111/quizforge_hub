@@ -97,17 +97,20 @@ export function createOfficialAi({ db, config, connect, points, json, readBody, 
     const upstreams = config.candidates();
     if (!upstreams.length) fail(503, 'AI_DISABLED', '免费 AI 暂时不可用，请稍后再试，或在 AI 设置中改用自己的模型');
     active.set(userId, (active.get(userId) || 0) + 1);
-    let answer = null, used = null;
+    let answer = null, used = null, tried = 0, throttled = 0;
     try {
-      // A key that fails is marked and skipped for a while, and the next key is tried.
+      // A key that fails is marked and skipped for a while; a rate-limited key is left as it is.
+      // Either way the next key is tried.
       for (const upstream of upstreams.slice(0, UPSTREAM_TRIES)) {
         const result = await call(upstream, request);
         if (result.body) { answer = result.body; used = upstream; break; }
+        tried++; if (result.failure.status === 'throttled') throttled++;
         config.failed(upstream.id, result.failure);
       }
     } finally {
       const left = (active.get(userId) || 1) - 1; if (left) active.set(userId, left); else active.delete(userId);
     }
+    if (!answer && throttled === tried) fail(429, 'AI_BUSY', '免费 AI 当前请求较多，请稍后再试，本次不扣额度');
     if (!answer) fail(502, 'AI_UPSTREAM_FAILED', '免费 AI 模型暂时没有响应，本次不扣额度，请稍后重试');
     const cost = costFor(answer.usage, used.prices), spent = points.charge(userId, cost);
     const tokens = Number.isSafeInteger(answer.usage?.total_tokens) && answer.usage.total_tokens > 0 ? answer.usage.total_tokens : 0;

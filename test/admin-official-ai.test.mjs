@@ -55,7 +55,7 @@ test('keys and codes are encrypted with an authenticated cipher, and provider er
   assert.equal(masterKey('short'), null);
   assert.equal(upstreamFailure(400, '{"code":"Arrearage"}').status, 'insufficient');
   assert.equal(upstreamFailure(402, '').status, 'insufficient');
-  assert.equal(upstreamFailure(429, '{"error":{"code":"insufficient_quota"}}').status, 'fault', 'a rate limit is a fault');
+  assert.equal(upstreamFailure(429, '{"error":{"code":"insufficient_quota"}}').status, 'throttled', 'a rate limit is brief, not a fault or arrears');
   assert.equal(upstreamFailure(401, '{"code":"InvalidApiKey"}').status, 'fault');
   assert.equal(upstreamFailure(400, '{"code":"InvalidParameter"}').status, 'rejected');
 });
@@ -124,6 +124,17 @@ test('grading goes down the list, marks failing keys, charges at the answering k
   assert.equal((await f.grade()).status, 200);
   const stats = (await f.request('/api/admin/official-ai')).body.stats;
   assert.equal(stats.totalCalls, 9); assert.ok(stats.totalCost > 0);
+  // A rate limit leaves the key ok: the next key is tried, and if all are limited the user is asked to retry.
+  await f.request(`/api/admin/ai-keys/${two.id}/enabled`, { method: 'PUT', body: { enabled: true } });
+  const limit = () => new Response('{"code":"Throttling"}', { status: 429 });
+  f.replies['two.example'] = limit;
+  f.upstream.length = 0; assert.equal((await f.grade()).status, 200);
+  assert.deepEqual(f.upstream.map(call => call.host), ['two.example', 'one.example'], 'the limited top key is passed over');
+  f.replies['one.example'] = limit;
+  const limited = await f.grade();
+  assert.equal(limited.status, 429); assert.equal(limited.body.error.code, 'AI_BUSY');
+  assert.deepEqual((await f.keys()).map(item => item.state), ['ok', 'ok'], 'rate limits do not mark keys as faulty');
+  delete f.replies['one.example']; delete f.replies['two.example'];
   assert.equal((await f.request(`/api/admin/ai-keys/${two.id}`, { method: 'DELETE' })).status, 200);
   assert.deepEqual((await f.keys()).map(item => item.seq), [1]);
   // An expired key is never used.

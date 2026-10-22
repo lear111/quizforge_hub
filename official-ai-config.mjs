@@ -54,12 +54,14 @@ export function costFor(usage, prices) {
   return Math.max(1, Math.ceil(amount / 1e6));
 }
 // Sorts a failed upstream response into the key status it causes. Rate limits are
-// faults; only an explicit arrears code or HTTP 402 means the account is out of money.
+// brief and leave the key as it is; only an explicit arrears code or HTTP 402 means
+// the account is out of money.
 export function upstreamFailure(status, text) {
   let code = ''; try { const body = JSON.parse(text); code = String(body?.error?.code ?? body?.code ?? ''); } catch { /* status only */ }
-  if (status !== 429 && (status === 402 || ARREARS.has(code))) return { status: 'insufficient', reason: `欠费或额度不足（${code || 'HTTP ' + status}）` };
+  if (status === 429) return { status: 'throttled', reason: `被限流（HTTP 429${code ? ' ' + code : ''}）` };
+  if (status === 402 || ARREARS.has(code)) return { status: 'insufficient', reason: `欠费或额度不足（${code || 'HTTP ' + status}）` };
   if (status === 400 && !code.startsWith('InvalidApiKey')) return { status: 'rejected', reason: `请求被拒绝（HTTP 400${code ? ' ' + code : ''}）` };
-  const what = { 401: 'Key 无效', 403: '没有权限', 404: '地址或模型不存在', 429: '被限流' }[status] || (status >= 500 ? '服务出错' : '请求失败');
+  const what = { 401: 'Key 无效', 403: '没有权限', 404: '地址或模型不存在' }[status] || (status >= 500 ? '服务出错' : '请求失败');
   return { status: 'fault', reason: `${what}（HTTP ${status}${code ? ' ' + code : ''}）` };
 }
 
@@ -108,9 +110,9 @@ export function createOfficialAiConfig({ db, base, master, now = () => Date.now(
     db.prepare(`UPDATE ai_upstreams SET status='ok',reason=NULL,status_at=?,cooldown_until=0,spent=spent+?,remaining=CASE WHEN remaining IS NULL THEN NULL ELSE MAX(remaining-?,0) END,
       input_tokens=input_tokens+?,output_tokens=output_tokens+?,calls=calls+1 WHERE id=?`).run(now(), cost, cost, count(usage?.prompt_tokens), count(usage?.completion_tokens), id);
   }
-  // Records a failed call or test. A rejected request does not change the key's status.
+  // Records a failed call or test. A rejected request or a brief rate limit does not change the key's status.
   function failed(id, failure) {
-    if (failure.status === 'rejected') return;
+    if (failure.status === 'rejected' || failure.status === 'throttled') return;
     const time = now(), until = time + (failure.status === 'insufficient' ? ARREARS_COOLDOWN : FAULT_COOLDOWN);
     db.prepare('UPDATE ai_upstreams SET status=?,reason=?,status_at=?,cooldown_until=? WHERE id=?').run(failure.status, failure.reason, time, until, id);
   }
@@ -123,7 +125,8 @@ export function createOfficialAiConfig({ db, base, master, now = () => Date.now(
       const text = await response.text(), ms = now() - started;
       if (response.ok) { let body = null; try { body = JSON.parse(text); } catch { /* checked below */ } return Array.isArray(body?.choices) ? { ok: true, ms, status: 'ok', reason: '测试通过' } : { ok: false, ms, status: 'fault', reason: '返回的不是 OpenAI 兼容格式' }; }
       const failure = upstreamFailure(response.status, text);
-      return { ok: false, ms, status: failure.status === 'rejected' ? 'fault' : failure.status, reason: failure.reason };
+      // A rate-limited test says nothing about the key itself, so it counts as ok.
+      return { ok: false, ms, status: failure.status === 'rejected' ? 'fault' : failure.status === 'throttled' ? 'ok' : failure.status, reason: failure.reason };
     } catch { return { ok: false, ms: now() - started, status: 'fault', reason: '连不上或超时' }; }
   }
   const amount = (value, label, maxValue, nullable) => {
