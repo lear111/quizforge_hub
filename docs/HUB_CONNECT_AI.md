@@ -116,7 +116,7 @@ Content-Type: application/json
 - 只接受 `messages`、`max_tokens`、`response_format`、`temperature`。拒绝 `stream`、`tools`、`functions`、`n>1` 及其他字段，返回 400 `AI_REQUEST_UNSUPPORTED`。
 - `max_tokens` 上限 8192，缺省为 8192。
 - 图片只接受 `image_url` 中的 `data:image/(png|jpeg|webp);base64,…`，不接受外部 URL。单张不超过 4 MiB，一次请求总大小不超过 12 MiB。
-- 每个账号同时最多 2 个进行中的请求，超出返回 429 `AI_BUSY`。
+- 每个账号同时最多 2 个进行中的请求，全站同时最多 8 个，超出返回 429 `AI_BUSY`。
 
 额度与费用：
 
