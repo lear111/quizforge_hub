@@ -146,13 +146,13 @@ test('the gateway forces the model, spends the balance by tokens, charges nothin
   grant(f, 'alice', 10);
   const call = (body = completion(), headers = bearer(token)) => f.request('/api/ai/v1/chat/completions', { method: 'POST', origin: null, headers, body });
   const points = async () => (await (await f.request('/api/connect/me', { headers: bearer(token) })).json()).ai.balance;
-  const ok = await call();
+  const ok = await call(completion({ stream: false }));
   const result = await ok.json();
   assert.equal(ok.status, 200); assert.equal(result.model, 'quizforge-official'); assert.equal(result.choices[0].message.content, '{"score":1}'); assert.notEqual(result.id, 'upstream-id');
   assert.deepEqual(result.quizforge, { cost: 4, balance: 6 }, '400 tokens at 1 yuan per million');
   const sent = f.calls[0];
   assert.equal(sent.url, 'https://upstream.example/v1/chat/completions'); assert.equal(sent.init.headers.Authorization, 'Bearer synthetic-upstream-key'); assert.equal(sent.init.redirect, 'error');
-  assert.equal(sent.body.model, 'qwen-vl-plus'); assert.equal(sent.body.max_tokens, 8192); assert.deepEqual(sent.body.response_format, { type: 'json_object' });
+  assert.equal(sent.body.model, 'qwen-vl-plus'); assert.equal(sent.body.max_tokens, 8192); assert.equal('stream' in sent.body, false); assert.deepEqual(sent.body.response_format, { type: 'json_object' });
   mode = 'down';
   const failed = await call();
   assert.equal(failed.status, 502); assert.equal((await failed.json()).error.code, 'AI_UPSTREAM_FAILED');

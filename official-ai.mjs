@@ -29,7 +29,9 @@ export function nextShanghaiMidnight(time) { const day = new Date(Date.parse(sha
 
 export function validateCompletion(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) reject('请求内容应为对象');
-  for (const key of Object.keys(body)) if (!FIELDS.has(key)) reject(`不支持的字段：${key}`);
+  // Clients may say stream: false explicitly (the Web host always does); streaming itself is not supported.
+  if (Object.hasOwn(body, 'stream') && body.stream !== false) reject('不支持流式输出（stream）');
+  for (const key of Object.keys(body)) if (key !== 'stream' && !FIELDS.has(key)) reject(`不支持的字段：${key}`);
   if (body.model !== 'quizforge-official') reject('model 必须为 quizforge-official');
   if (!Array.isArray(body.messages) || !body.messages.length || body.messages.length > 50) reject('messages 必须是 1–50 条消息');
   let images = 0;
