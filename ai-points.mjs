@@ -129,5 +129,37 @@ export function createAiPoints({ db, master = null, now = () => Date.now() }) {
     return { userBalance: db.prepare('SELECT COALESCE(SUM(balance),0) AS n FROM ai_points').get().n, codeTotal: codes.total, codeRedeemed: codes.used };
   }
 
-  return { balance, charge, redeem, createCodes, listCodes, updateCode, summary };
+  // Balance and total redeemed for the admin user list.
+  function accounts(userIds) {
+    const result = {};
+    for (const id of userIds) result[id] = { balance: balance(id), redeemed: db.prepare("SELECT COALESCE(SUM(delta),0) AS n FROM ai_points_ledger WHERE user_id=? AND kind='redeem'").get(id).n };
+    return result;
+  }
+  // An administrator sets a new balance (not an increment) with a reason; the change is a ledger entry.
+  function setBalance(userId, input) {
+    const allowed = ['balance', 'reason'];
+    if (!input || typeof input !== 'object' || Object.keys(input).some(field => !allowed.includes(field))) fail400('只能修改余额');
+    if (!Number.isSafeInteger(input.balance) || input.balance < 0 || input.balance > 1e6 * UNIT) fail400('余额需为 0–1000000 元');
+    const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+    if (!reason || Array.from(reason).length > 200) fail400('请填写 1–200 个字的原因');
+    if (!db.prepare('SELECT 1 FROM users WHERE id=?').get(userId)) fail(404, 'USER_NOT_FOUND', '用户不存在');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const before = balance(userId), time = now();
+      db.prepare('INSERT INTO ai_points VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET balance=excluded.balance,updated=excluded.updated').run(userId, input.balance, time);
+      if (input.balance !== before) db.prepare('INSERT INTO ai_points_ledger VALUES (?,?,?,?,?,?)').run(randomUUID(), userId, input.balance - before, 'admin', reason, time);
+      db.exec('COMMIT');
+      return { before, after: input.balance, reason };
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  // Recent balance changes: redeems and admin changes one by one, grading spend per day.
+  function history(userId, limit = 20) {
+    const entries = db.prepare(`SELECT l.delta,l.kind,l.ref,l.created,c.prefix FROM ai_points_ledger l LEFT JOIN ai_redeem_codes c ON l.kind='redeem' AND c.id=l.ref WHERE l.user_id=? ORDER BY l.created DESC LIMIT ?`).all(userId, limit)
+      .map(row => ({ kind: row.kind, delta: row.delta, at: row.created, note: row.kind === 'redeem' ? row.prefix || '' : row.ref || '' }));
+    let spend = [];
+    try { spend = db.prepare('SELECT day,calls,points FROM official_ai_usage WHERE user_id=? AND points>0 ORDER BY day DESC LIMIT ?').all(userId, limit).map(row => ({ kind: 'grading', delta: -row.points, day: row.day, calls: row.calls, at: Date.parse(row.day + 'T23:59:59+08:00') })); } catch { /* no grading yet */ }
+    return [...entries, ...spend].sort((a, b) => b.at - a.at).slice(0, limit);
+  }
+
+  return { balance, charge, redeem, createCodes, listCodes, updateCode, summary, accounts, setBalance, history };
 }

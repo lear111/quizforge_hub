@@ -3,6 +3,8 @@
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const UNIT = 10000;
 const yuan = (units, digits = 2) => '¥' + (Number(units || 0) / UNIT).toFixed(digits);
+// Exact amounts: four decimals only when there are fractions of a cent.
+const exact = units => yuan(units, Number(units || 0) % 100 ? 4 : 2);
 const plain = units => String(Number(units || 0) / UNIT);
 const toUnits = value => Math.round(Number(value) * UNIT);
 const day = value => value ? new Date(value + 8 * 3600000).toISOString().slice(0, 10) : '';
@@ -68,14 +70,14 @@ export function createAiPages({ root, main, api, toast }) {
   }
 
   // Dialogs. `submit` returns false to keep the dialog open (for example to show a result).
-  function open(title, body, { submitLabel = '保存', danger = false, extra = '', submit }) {
+  function open(title, body, { submitLabel = '保存', danger = false, extra = '', submit, after = rerender }) {
     dialog.innerHTML = `<form method="dialog" class="qa-dialog-form"><h2>${esc(title)}</h2>${body}<p class="qa-error" role="alert"></p>
       <div class="qa-dialog-actions">${extra}<button type="button" class="qa-btn" data-dialog="cancel">取消</button><button type="submit" class="qa-btn ${danger ? 'danger' : 'primary'}">${submitLabel}</button></div></form>`;
     const form = dialog.querySelector('form'), error = form.querySelector('[role=alert]'), button = form.querySelector('[type=submit]');
     form.addEventListener('submit', async event => {
       event.preventDefault(); if (!form.reportValidity()) return;
       error.textContent = ''; button.disabled = true; const label = button.textContent; button.textContent = '正在处理…';
-      try { if (await submit(new FormData(form), form) !== false) { dialog.close(); await rerender(); } }
+      try { if (await submit(new FormData(form), form) !== false) { dialog.close(); await after(); } }
       catch (cause) { error.textContent = cause.message; }
       finally { button.disabled = false; button.textContent = label; }
     });
@@ -192,5 +194,19 @@ export function createAiPages({ root, main, api, toast }) {
     if (ids.join() !== keys.map(entry => entry.id).join()) { try { await saveOrder(ids); } catch (cause) { toast(cause.message); await rerender(); } }
   });
 
-  return { render: name => name === 'ai-codes' ? codesPage() : keysPage(), leave() { page = null; if (dialog.open) dialog.close(); } };
+  // 用户管理 → 调整余额: a new balance (not an increment) and a required reason, with recent changes.
+  async function adjustBalance(user, done) {
+    const { balance, history } = await api(`/users/${user.id}/ai-balance`);
+    const line = entry => `<li><span>${esc(entry.kind === 'grading' ? `${entry.day} 评分 ${entry.calls} 次` : `${shortTime(entry.at)} ${entry.kind === 'redeem' ? '兑换码 ' + entry.note : '管理员调整：' + entry.note}`)}</span><span>${entry.delta >= 0 ? '+' : '−'}${yuan(Math.abs(entry.delta), entry.kind === 'grading' ? 4 : 2)}</span></li>`;
+    open(`调整 ${user.name} 的 AI 余额`, `<p class="qa-muted">当前余额 ${exact(balance)}</p><div class="qa-fields">
+      ${field('新余额（元）', `<input name="balance" type="number" required min="0" max="1000000" step="0.0001" value="${plain(balance)}">`, true)}
+      ${field('原因（记入操作日志）', '<textarea name="reason" required maxlength="200" rows="2"></textarea>', true)}</div>
+      <p class="qa-muted">填写的是新的余额，不在原来基础上累加。</p>
+      ${history.length ? `<h3 class="qa-history-title">最近的余额变动</h3><ul class="qa-history">${history.map(line).join('')}</ul>` : '<p class="qa-muted">还没有余额变动。</p>'}`, {
+      async submit(data) { const result = await api(`/users/${user.id}/ai-balance`, { method: 'PUT', body: { balance: toUnits(data.get('balance')), reason: String(data.get('reason') || '').trim() } }); toast(`${user.name} 的 AI 余额已改为 ${exact(result.balance)}。`); },
+      after: done,
+    });
+  }
+
+  return { adjustBalance, render: name => name === 'ai-codes' ? codesPage() : keysPage(), leave() { page = null; if (dialog.open) dialog.close(); } };
 }

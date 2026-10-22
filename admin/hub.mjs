@@ -19,8 +19,9 @@ export function createHubAdmin({ db, invitations, invitationPolicy, metrics, req
     const where = "WHERE name LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!'";
     const rows = db.prepare(`SELECT id,name,email,admin,created FROM users ${where} ORDER BY created DESC,id LIMIT 50 OFFSET ?`).all(pattern, pattern, (page - 1) * 50);
     const quotas = rows.length ? await call(req, '/accounts?ids=' + rows.map(u => u.id).join(',')) : { accounts: {}, defaults: {} };
+    const ai = aiPoints ? aiPoints.accounts(rows.map(u => u.id)) : {};
     return { page, count: db.prepare(`SELECT COUNT(*) AS n FROM users ${where}`).get(pattern, pattern).n, defaults: quotas.defaults,
-      users: rows.map(u => ({ ...u, disabled: !!db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(u.id), lastSeen: db.prepare('SELECT last_seen FROM activity_online WHERE user_id=?').get(u.id)?.last_seen || null, invitation: db.prepare('SELECT prefix FROM invitations WHERE user_id=?').get(u.id)?.prefix || null, resources: quotas.accounts[u.id] || { limits: quotas.defaults, overrides: { storageBytes: null, dailyTrafficBytes: null }, usage: { storageBytes: 0, dailyTrafficBytes: 0 } } })) };
+      users: rows.map(u => ({ ...u, disabled: !!db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(u.id), lastSeen: db.prepare('SELECT last_seen FROM activity_online WHERE user_id=?').get(u.id)?.last_seen || null, invitation: db.prepare('SELECT prefix FROM invitations WHERE user_id=?').get(u.id)?.prefix || null, ai: ai[u.id] || { balance: 0, redeemed: 0 }, resources: quotas.accounts[u.id] || { limits: quotas.defaults, overrides: { storageBytes: null, dailyTrafficBytes: null }, usage: { storageBytes: 0, dailyTrafficBytes: 0 } } })) };
   };
   return async (req, res, url) => {
     if (url.pathname === '/api/activity' && req.method === 'POST') {
@@ -66,7 +67,17 @@ export function createHubAdmin({ db, invitations, invitationPolicy, metrics, req
       else if (action === 'enabled' && req.method === 'PUT') { const { enabled } = await jsonBody(req); const item = officialAi.setKeyEnabled(id, enabled); audit(actor.id, enabled ? 'ai-key-enabled' : 'ai-key-disabled', id, { seq: item.seq }); value = { item }; }
       else throw new CloudError(405, '不支持的操作');
     }
-    // Redeem codes are the only way to add to a user's balance.
+    // A user's free AI balance: administrators set a new amount with a reason (audited).
+    else if (/^\/users\/[a-f0-9-]{36}\/ai-balance$/.test(route) && ['GET', 'PUT'].includes(req.method) && aiPoints) {
+      const id = route.split('/')[2];
+      if (req.method === 'PUT') {
+        throttle(req, 'admin-ai-balance', 30, actor.id);
+        const change = aiPoints.setBalance(id, await jsonBody(req));
+        if (change.before !== change.after) audit(actor.id, 'ai-balance-set', id, change);
+      }
+      value = { balance: aiPoints.balance(id), history: aiPoints.history(id) };
+    }
+    // Redeem codes and administrator changes are the only ways to add to a user's balance.
     else if (route === '/ai-codes' && req.method === 'GET' && aiPoints) { const summary = aiPoints.summary(); value = { items: aiPoints.listCodes(), stats: { total: summary.codeTotal, redeemed: summary.codeRedeemed } }; }
     else if (route === '/ai-codes' && req.method === 'POST' && aiPoints) {
       throttle(req, 'admin-ai-codes', 10, actor.id);

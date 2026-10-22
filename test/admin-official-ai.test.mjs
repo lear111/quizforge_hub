@@ -180,3 +180,18 @@ test('redeem codes: created enabled, listed in full while unused, note and switc
   const audit = f.db.prepare("SELECT action,detail FROM admin_audit WHERE action LIKE 'ai-code%'").all();
   assert.equal(JSON.stringify(audit).includes(code.code), false, 'the audit log holds no full code');
 });
+
+test('administrators set a user balance with a required reason; it is audited and shows in the history', async t => {
+  const f = await fixture(t), route = `/api/admin/users/${f.users.alice.id}/ai-balance`;
+  assert.equal((await f.request(route, { user: 'alice' })).status, 403);
+  assert.equal((await f.request(route, { method: 'PUT', body: { balance: 200000 } })).status, 400, 'a reason is required');
+  assert.equal((await f.request(route, { method: 'PUT', body: { balance: -1, reason: 'x' } })).status, 400);
+  f.grant(50000);
+  const set = await f.request(route, { method: 'PUT', body: { balance: 200000, reason: '内测补偿' } });
+  assert.equal(set.status, 200); assert.equal(set.body.balance, 200000, 'the new value replaces the old one');
+  assert.deepEqual(set.body.history.map(entry => [entry.kind, entry.delta, entry.note]), [['admin', 150000, '内测补偿']]);
+  const audit = f.db.prepare("SELECT detail FROM admin_audit WHERE action='ai-balance-set'").all().map(row => JSON.parse(row.detail));
+  assert.deepEqual(audit, [{ before: 50000, after: 200000, reason: '内测补偿' }]);
+  assert.equal(f.app.aiPoints.balance(f.users.alice.id), 200000);
+  assert.equal((await f.request(`/api/admin/users/${randomUUID()}/ai-balance`, { method: 'PUT', body: { balance: 1, reason: 'x' } })).status, 404);
+});
