@@ -10,7 +10,7 @@ import { CloudAccounts } from '../cloud/accounts.mjs';
 import { CloudLibrary } from '../cloud/library.mjs';
 import { gradeDirect, testGradingModel } from '../public/cloud/vault.js';
 
-const snapshot = fileURLToPath(new URL('../.runtime/web-current', import.meta.url));
+const snapshot = (process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url)));
 const alice = '11111111-1111-4111-8111-111111111111', bob = '22222222-2222-4222-8222-222222222222';
 const page = '44444444-4444-4444-8444-444444444444';
 const doc = text => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });

@@ -10,7 +10,7 @@ import { createApp } from '../server.mjs';
 import { createPracticeAdminBridge, createAdminClient } from '../admin/bridge.mjs';
 import { loadRuntime } from '../cloud/runtime.mjs';
 
-const snapshot = fileURLToPath(new URL('../.runtime/web-current', import.meta.url));
+const snapshot = (process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url)));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
 const stop = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });

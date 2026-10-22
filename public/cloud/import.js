@@ -9,7 +9,7 @@ async function install() {
     if (response.status === 401) { location.replace('/auth/hub?return=' + encodeURIComponent(location.pathname + location.search)); return; }
     if (!response.ok) throw new Error(result.error || '下载失败，请稍后重试');
     status.textContent = result.alreadyInstalled ? '此版本已在你的云端空间，正在打开…' : '已下载到云端，正在打开练习…';
-    location.replace('/cloud/practice/' + result.item.id + '/');
+    location.replace('/cloud/practice/' + result.item.id + '/' + (result.item.importedBankId ? '?imported-bank=' + encodeURIComponent(result.item.importedBankId) : ''));
   } catch (error) { status.textContent = error.message; retry.hidden = false; }
 }
 async function start() {

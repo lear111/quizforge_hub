@@ -46,7 +46,7 @@ export function createPracticeAdminBridge({ library, authenticate, hubPort = 431
       let value, status = 200;
       if (route === '/summary' && req.method === 'GET') {
         const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-        value = { site: accounts.siteStatus(), defaults: accounts.defaults(), imports: db.prepare("SELECT COUNT(*) AS n FROM cloud_imports WHERE status='ready'").get().n, pendingExtensions: db.prepare("SELECT COUNT(*) AS n FROM extension_submissions WHERE status='pending'").get().n, reviewStorageBytes: db.prepare('SELECT COALESCE(SUM(bytes),0) AS n FROM extension_submissions').get().n, transfers: db.prepare('SELECT requests,bytes FROM activity_transfers WHERE day=?').get(day) || { requests: 0, bytes: 0 } };
+        value = { site: accounts.siteStatus(), defaults: accounts.defaults(), imports: db.prepare("SELECT COALESCE(SUM(json_array_length(catalog,'$.banks')),0) AS n FROM cloud_imports WHERE status='ready'").get().n, pendingExtensions: db.prepare("SELECT COUNT(*) AS n FROM extension_submissions WHERE status='pending'").get().n, reviewStorageBytes: db.prepare('SELECT COALESCE(SUM(bytes),0) AS n FROM extension_submissions').get().n, transfers: db.prepare('SELECT requests,bytes FROM activity_transfers WHERE day=?').get(day) || { requests: 0, bytes: 0 } };
       }
       else if (route === '/accounts' && req.method === 'GET') {
         const ids = (url.searchParams.get('ids') || '').split(','); if (ids.length > 50 || ids.some(id => !uuid(id))) throw new CloudError(400, '用户列表无效');

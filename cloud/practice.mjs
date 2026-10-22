@@ -10,6 +10,7 @@ import { attachCloudAi } from './ai.mjs';
 
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json' };
 const jsonBytes = value => Buffer.from(JSON.stringify(value));
+const publicSharedModules = new Set(['shared/answer-area/1.3.0/model.js', 'shared/answer-area/1.4.0/model.js', 'shared/ink/1.0.0/renderer.js']);
 export class CloudPractice {
   constructor(library) {
     this.library = library; this.db = library.db; this.accounts = library.accounts; this.sessions = new Map(); this.pending = 0; this.tail = Promise.resolve(); this.closed = false;
@@ -69,9 +70,22 @@ export class CloudPractice {
     service.api = async (context, pathname) => {
       if (pathname === '/api/settings/development' && context.request.method === 'GET') return { enabled: false, canManage: false };
       if (pathname === '/api/settings/ai' && context.request.method === 'GET') return { enabled: false, canManage: false, apiKeyConfigured: false, baseUrl: '', model: '', provider: 'openai-compatible', autoGrade: false, vision: false, outputMode: 'json', maxOutputTokens: 8192, timeoutSeconds: 90, testReport: null };
+      if (pathname === '/api/library/import' && context.request.method === 'POST') {
+        if (context.request.headers['content-type']?.split(';')[0].trim() !== 'application/vnd.quizforge.qbank') throw new ApiError(415, 'QBANK_REQUIRED', '请上传 QuizForge .qbank 文件');
+        let filename; try { filename = decodeURIComponent(context.request.headers['x-quizforge-filename'] || ''); } catch { throw new ApiError(400, 'INVALID_FILENAME', '文件名无效'); }
+        return service.namespaceTransaction(async () => {
+          const archive = new r.LibraryArchive(service.root, service.resources);
+          const result = await archive.importPackage(context.request, async staging => {
+            try { for (const directory of r.scanExtensions(path.join(staging, 'extensions'))) this.library.reviews.verify(directory); }
+            catch (error) { throw new ApiError(error.status || 422, 'CLOUD_EXTENSION_REVIEW_REQUIRED', error.message); }
+            const candidate = new r.Library(staging, r.core, this.library.engine);
+            try { await r.validateImportLibrary(candidate); } finally { candidate.close(); }
+          }, filename);
+          service.library.invalidate(); return { ...result, catalog: { ...service.library.index(), canManage: true } };
+        });
+      }
       if (pathname === '/api/library/manage' && context.request.method === 'POST') {
         const input = await service.writeRequest(context);
-        if (input?.kind !== 'bank') throw new ApiError(403, 'CLOUD_BANK_MANAGEMENT_ONLY', '云端只能管理自己的题库与题库分组');
         return service.namespaceTransaction(async () => {
           const result = await service.library.manage(input);
           service.states.clearMemory(); service.developmentStates.clearMemory(); return result;
@@ -99,7 +113,8 @@ export class CloudPractice {
     try {
       const result = await operation();
       this.approved(root);
-      const bytes = treeBytes(root, { ignoreTemp: true, ignorePlatform: true }), delta = bytes - row.bytes;
+      const mergedRows = result.mergedRows || [];
+      const bytes = treeBytes(root, { ignoreTemp: true, ignorePlatform: true }), delta = bytes - row.bytes - mergedRows.reduce((sum, item) => sum + item.bytes, 0);
       const updatedCatalog = result.catalogUpdate;
       if (delta > 0) reservation = this.accounts.reserveStorage(row.user_id, delta);
       this.accounts.transaction(() => {
@@ -107,6 +122,12 @@ export class CloudPractice {
         if (delta < 0) this.accounts.removeStorage(row.user_id, -delta, { transaction: false });
         if (updatedCatalog) this.db.prepare('UPDATE cloud_imports SET bytes=?,catalog=?,title=? WHERE id=?').run(bytes, JSON.stringify(updatedCatalog), updatedCatalog.banks.length === 1 ? updatedCatalog.banks[0].title || row.title : row.title, row.id);
         else this.db.prepare('UPDATE cloud_imports SET bytes=? WHERE id=?').run(bytes, row.id);
+        for (const previous of mergedRows) {
+          this.db.prepare('INSERT INTO cloud_workspace_members VALUES (?,?,?,?,?)').run(previous.id, row.user_id, row.id, previous.source, previous.catalog);
+          this.db.prepare("UPDATE cloud_imports SET status='merged',bytes=0 WHERE id=? AND user_id=?").run(previous.id, row.user_id);
+        }
+        if (result.workspaceMember) this.db.prepare('INSERT INTO cloud_workspace_members VALUES (?,?,?,?,?)').run(result.workspaceMember.id, row.user_id, row.id, JSON.stringify(result.workspaceMember.source), JSON.stringify(result.workspaceMember.result));
+        if (result.deliveryAudit) this.accounts.audit(result.deliveryAudit.actorId, row.user_id, 'private-delivery', {}, { importId: row.id, title: result.deliveryAudit.filename, bytes }, '管理员向指定用户交付私人题库');
         this.db.prepare('DELETE FROM cloud_practice_writes WHERE id=?').run(id);
       });
       committed = true; return result;
@@ -121,21 +142,28 @@ export class CloudPractice {
     }
   }
   async api(userId, importId, pathname, request) {
-    const route = pathname.split('?')[0], managing = route === '/api/library/manage';
-    if (!pathname.startsWith('/api/') || /^\/api\/(?:auth|settings\/(?!ai$|development$)|development|library\/(?:import|export))/.test(route) || managing && request.method !== 'POST') throw new CloudError(403, '此操作请从 Hub 的云端空间完成');
+    const importing = pathname.split('?')[0] === '/api/library/import';
+    if (importing && this.uploading) throw new CloudError(503, '另一份题库正在上传，请稍后重试');
+    if (importing) this.uploading = true;
+    try { return await this.scopedApi(userId, importId, pathname, request); }
+    finally { if (importing) this.uploading = false; }
+  }
+  async scopedApi(userId, importId, pathname, request) {
+    const route = pathname.split('?')[0], importing = route === '/api/library/import', managing = route === '/api/library/manage' || importing;
+    if (!pathname.startsWith('/api/') || /^\/api\/(?:auth|settings\/(?!ai$|development$)|development|library\/export)/.test(route) || route.startsWith('/api/library/import/') || managing && request.method !== 'POST') throw new CloudError(403, '此操作请从 Hub 的云端空间完成');
     if (pathname.startsWith('/api/settings/') && request.method !== 'GET') throw new CloudError(403, '云端设置请在 Hub 中管理');
     if (!['GET', 'POST', 'PUT', 'DELETE'].includes(request.method)) throw new CloudError(405, '请求方法不受支持');
     let body;
     if (!['GET', 'HEAD'].includes(request.method)) {
       const chunks = []; let bytes = 0;
-      for await (const chunk of request) { if ((bytes += chunk.length) > 8 * 1024 ** 2) throw new CloudError(413, '保存内容超过 8 MiB 上限'); chunks.push(chunk); }
+      for await (const chunk of request) { if ((bytes += chunk.length) > (importing ? 64 : 8) * 1024 ** 2) throw new CloudError(413, '请求内容超过大小上限'); chunks.push(chunk); }
       body = Buffer.concat(chunks);
     }
     return this.serial(async () => {
       const row = this.library.owned(userId, importId);
       try { return await this.checkpoint(row, async () => {
         const service = await this.session(row), port = service.port(), headers = { Host: `127.0.0.1:${port}`, Origin: `http://127.0.0.1:${port}` };
-        for (const name of ['content-type', 'x-quizforge-practice-session', 'x-quizforge-question-stamp', 'x-quizforge-transient-resource', 'x-quizforge-cloud-ai']) if (request.headers[name]) headers[name] = request.headers[name];
+        for (const name of ['content-type', 'x-quizforge-filename', 'x-quizforge-practice-session', 'x-quizforge-question-stamp', 'x-quizforge-transient-resource', 'x-quizforge-cloud-ai']) if (request.headers[name]) headers[name] = request.headers[name];
         if (body) headers['Content-Length'] = body.length;
         const result = await new Promise((resolve, reject) => {
           // Checkpoint file work can outlive the core's idle connection timeout.
@@ -149,7 +177,7 @@ export class CloudPractice {
         });
         await Promise.allSettled([...service.handlers]);
         if (managing) {
-          if (result.status >= 400) throw Object.assign(new Error('Bank management rejected'), { practiceResponse: result });
+          if (result.status >= 400) throw Object.assign(new Error('Practice request rejected'), { practiceResponse: result });
           result.catalogUpdate = JSON.parse(result.bytes).catalog;
         }
         return result;
@@ -161,10 +189,14 @@ export class CloudPractice {
     if (file === '') file = 'index.html';
     if (file === 'favicon.ico') file = 'assets/quizforge-icon.png';
     if (file.includes('\\') || file.includes('\0') || path.isAbsolute(file) || file.split('/').some(name => name === '..' || name.startsWith('.'))) throw new CloudError(404, '页面不存在');
-    const root = path.join(this.library.runtime.core, 'web'), target = path.resolve(root, file), relative = path.relative(root, target), type = types[path.extname(file)];
+    const root = publicSharedModules.has(file) ? this.library.runtime.core : path.join(this.library.runtime.core, 'web'), target = path.resolve(root, file), relative = path.relative(root, target), type = types[path.extname(file)];
     if (!type || relative.startsWith('..') || !fs.existsSync(target) || !fs.statSync(target).isFile() || fs.statSync(target).size > 4 * 1024 ** 2) throw new CloudError(404, '页面资源不存在');
     let bytes = fs.readFileSync(target);
     const prefix = `/api/cloud/practice/${importId}`, base = `/cloud/practice/${importId}`;
+    if (file.endsWith('.js')) bytes = Buffer.from(bytes.toString('utf8').replace(/((?:from\s*|import\s*(?:\(\s*)?)['"])(\.[^'"\n]+)(['"])/g, (match, before, specifier, after) => {
+      const shared = path.relative(this.library.runtime.core, path.resolve(path.dirname(target), specifier)).replaceAll('\\', '/');
+      return publicSharedModules.has(shared) ? before + base + '/' + shared + after : match;
+    }));
     if (ordinary && ['app.js', 'index.html', 'shell/appearance.js', 'shell/themes.css', 'library/library-transfer.js'].includes(file)) bytes = Buffer.from(ordinaryPracticeAsset(file, bytes.toString('utf8'), base));
     if (ordinary && file === 'manifest.webmanifest') {
       const manifest = JSON.parse(bytes);

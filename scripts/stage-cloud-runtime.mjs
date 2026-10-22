@@ -4,28 +4,25 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { extensionDigest } from '../cloud/extension-review.mjs';
+import { stageCloudBasicContent, copyCloudDependencies } from './cloud-runtime-content.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const source = path.resolve(process.argv[2] || path.join(repo, '..', 'quizforge_web'));
 const target = path.resolve(process.argv[3] || path.join(repo, '.runtime', 'web-current'));
+const moduleRoot = path.resolve(process.argv[4] || path.join(source, 'core', 'node_modules'));
 if (fs.existsSync(target)) throw new Error('Runtime destination already exists; use a new versioned destination');
 if (!fs.existsSync(path.join(source, 'core', 'package-lock.json'))) throw new Error('Expected the existing QuizForge Web checkout');
 fs.mkdirSync(target, { recursive: true });
 const core = path.join(target, 'core');
 const copy = (from, to) => fs.cpSync(from, to, { recursive: true, filter: file => !/\.test\.(?:m?js)$/.test(file) && !['.state', '.temp', '.git', '.claude'].includes(path.basename(file)) });
 for (const name of ['server', 'web', 'shared', 'package.json', 'package-lock.json']) copy(path.join(source, 'core', name), path.join(core, name));
-const modules = ['ajv', 'qrcode-generator', 'yauzl', 'yazl'];
-const copied = new Set();
-for (const name of modules) {
-  if (copied.has(name)) continue;
-  const directory = path.join(source, 'core', 'node_modules', name), metadata = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
-  if (metadata.os || metadata.cpu) throw new Error('Cloud snapshot accepts portable JavaScript runtime dependencies only');
-  copy(directory, path.join(core, 'node_modules', name)); copied.add(name); modules.push(...Object.keys(metadata.dependencies ?? {}));
-}
-// Export only the four official basic extensions and the shipped demonstration
-// bank. Never copy the user's library, .state, AI config or development folders.
-const { stageBasicContent } = await import(pathToFileURL(path.join(source, 'core/scripts/build/stage-basic-content.mjs')));
-stageBasicContent(source, path.join(target, 'basic-content'));
+// Native canvas must be installed for the machine building this snapshot.
+// Build Linux snapshots on Linux; never copy the Windows native binding there.
+copyCloudDependencies(moduleRoot, path.join(core, 'node_modules'));
+const { createRequire } = await import('node:module');
+const canvas = createRequire(path.join(core, 'package.json'))('@napi-rs/canvas');
+const smoke = canvas.createCanvas(64, 64); smoke.getContext('2d').fillText('答题区 Aa', 0, 24); smoke.toBuffer('image/png');
+stageCloudBasicContent(source, path.join(target, 'basic-content'));
 const { LibraryArchive } = await import(pathToFileURL(path.join(core, 'server/host/library/library-archive.js')));
 const { ResourceStore } = await import(pathToFileURL(path.join(core, 'server/host/resources/resources.js')));
 const basic = path.join(target, 'basic-content'), archive = new LibraryArchive(basic, new ResourceStore(basic));
@@ -44,5 +41,5 @@ function visit(directory) {
   }
 }
 visit(target);
-fs.writeFileSync(path.join(target, 'snapshot.json'), JSON.stringify({ schemaVersion: 1, sourceRevision: revision, includesWorkingTree: true, builtins: reviews, inventory }, null, 2));
+fs.writeFileSync(path.join(target, 'snapshot.json'), JSON.stringify({ schemaVersion: 1, sourceRevision: revision, includesWorkingTree: true, runtimeTarget: { platform: process.platform, arch: process.arch, libc: process.platform === 'linux' ? process.report.getReport().header.glibcVersionRuntime ? 'glibc' : 'musl' : null }, builtins: reviews, inventory }, null, 2));
 console.log(JSON.stringify({ target, files: inventory.length, extensions: reviews.map(item => ({ id: item.extensionId, digest: item.digest })) }));

@@ -87,7 +87,7 @@ export async function createApp(options = {}) {
     defaults: options.cloud?.defaults ?? { storageBytes: Number(process.env.CLOUD_STORAGE_MB || 256) * MB, dailyTrafficBytes: Number(process.env.CLOUD_DAILY_TRAFFIC_MB || 256) * MB, monthlyTrafficBytes: Number(process.env.CLOUD_MONTHLY_TRAFFIC_MB || 1024) * MB },
   }) : null;
   const runtimeDirectory = options.cloudRuntimeDir ?? process.env.CLOUD_RUNTIME_DIR;
-  const cloudLibrary = cloudAccounts && runtimeDirectory ? await CloudLibrary.create(db, cloudAccounts, dataDir, runtimeDirectory) : null;
+  const cloudLibrary = cloudAccounts && runtimeDirectory ? await CloudLibrary.create(db, cloudAccounts, dataDir, runtimeDirectory, { unifiedWorkspace: !!options.practiceHome }) : null;
   const reviewPackages = cloudLibrary ? new ReviewPackages(cloudLibrary) : null;
   db.exec('CREATE TABLE IF NOT EXISTS traffic (period TEXT PRIMARY KEY, bytes INTEGER NOT NULL)');
   const month = () => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.BILLING_TIMEZONE || 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date());
@@ -318,6 +318,12 @@ export async function createApp(options = {}) {
         const user = requireUser(req);
         if (!cloudLibrary) fail(503, '云端练习运行时尚未配置');
         throttle(req, 'cloud-practice', 240, user.id);
+        if (practiceApi?.[2] === '/api/library/import' && req.method === 'POST') throttle(req, 'cloud-import', 6, user.id);
+        if (options.practiceHome && practicePage && practicePage[2] === '') {
+          cloudLibrary.owned(user.id, practicePage[1]);
+          const workspace = await cloudLibrary.ensureDemo(user.id);
+          if (workspace.id !== practicePage[1]) { res.writeHead(303, { Location: `/cloud/practice/${workspace.id}/` + url.search, 'Cache-Control': 'no-store' }).end(); return; }
+        }
         let result;
         if (practiceApi) result = await cloudLibrary.practice.api(user.id, practiceApi[1], practiceApi[2] + url.search, req);
         else {
@@ -514,7 +520,9 @@ export async function createApp(options = {}) {
       if (res.headersSent) { res.destroy(); return; }
       const status = e instanceof ApiError || e instanceof EmailCodeError || e instanceof InvitationError || e instanceof CloudError ? e.status : e.code === 'ENOENT' ? 404 : 500;
       if (status === 500) console.error('Request failed:', e.name, e.code || 'internal');
-      json(res, status, { error: status === 500 ? '服务器暂时无法处理，请稍后重试' : status === 404 && !(e instanceof ApiError) ? '文件不存在' : e.message });
+      const message = status === 500 ? '服务器暂时无法处理，请稍后重试' : status === 404 && !(e instanceof ApiError) ? '文件不存在' : e.message;
+      const scopedPractice = /^\/api\/cloud\/practice\/[a-f0-9-]{36}\/api\//.test(req.url.split('?')[0]);
+      json(res, status, { error: scopedPractice ? { code: e.code || 'CLOUD_REQUEST_REJECTED', message } : message });
     }
   });
   server.requestTimeout = 45000; server.headersTimeout = 10000;

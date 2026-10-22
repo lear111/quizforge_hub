@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from '../server.mjs';
 import { createHubSource, hubImportTarget, importReturnPath } from '../cloud/hub-source.mjs';
 
-const snapshot = fileURLToPath(new URL('../.runtime/web-current', import.meta.url)), id = '11111111-1111-4111-8111-111111111111';
+const snapshot = (process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url))), id = '11111111-1111-4111-8111-111111111111';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const stop = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
 test('cloud import target only accepts a bank and revision, with no external login redirect', () => {
@@ -52,7 +52,9 @@ test('two real Hub instances import a format 3 bank via pinned download, preserv
   const route = '/api/cloud/library/from-hub', input = { packId, revision: 3 };
   assert.equal((await request(route, '', input)).status, 401); assert.equal((await request(route, 'alice', input, 'https://evil.example')).status, 403);
   const response = await request(route, 'alice', input); assert.equal(response.status, 201, await response.clone().text()); const { item } = await response.json();
-  assert.equal(item.source.sha256, hash(bytes)); assert.equal(item.banks.length, 1);
+  const membership = practice.db.prepare("SELECT source FROM cloud_workspace_members WHERE json_extract(source,'$.packId')=?").get(packId);
+  assert.equal(JSON.parse(membership.source).sha256, hash(bytes)); assert.equal(item.banks.length, 2);
+  assert.ok(item.banks.some(bank => bank.id === item.importedBankId));
   const page = '/cloud/practice/'+item.id+'/'; assert.equal((await request(page)).status, 200); assert.equal((await request(page, 'bob')).status, 404);
   const me = await (await request('/api/cloud/me')).json(); assert.ok(me.usage.storageBytes > 0); assert.equal(me.usage.dailyTrafficBytes, 0);
   const again = await request(route, 'alice', input); assert.equal(again.status, 200); assert.equal((await again.json()).alreadyInstalled, true); assert.equal(db.prepare('SELECT downloads FROM packs WHERE id=?').get(packId).downloads, 1);

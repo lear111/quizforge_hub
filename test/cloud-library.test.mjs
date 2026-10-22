@@ -10,7 +10,7 @@ import { CloudLibrary, treeBytes } from '../cloud/library.mjs';
 import { extensionDigest } from '../cloud/extension-review.mjs';
 import { Readable } from 'node:stream';
 
-const snapshot = path.resolve(fileURLToPath(new URL('../.runtime/web-current', import.meta.url)));
+const snapshot = path.resolve((process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url))));
 const alice = '11111111-1111-4111-8111-111111111111', bob = '22222222-2222-4222-8222-222222222222', admin = '33333333-3333-4333-8333-333333333333';
 test('审核摘要包含编辑器、资源、示例和额外文件，仅导入显示名称与示例绑定不改变摘要', t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'qfh-review-'));

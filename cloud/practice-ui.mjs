@@ -6,8 +6,10 @@ const replaceRequired = (source, find, value) => {
 export function ordinaryPracticeAsset(file, source, base) {
   if (file === 'shell/appearance.js') {
     source = replaceRequired(source, 'DEFAULT_DIM=30', 'DEFAULT_DIM=15');
-    source = replaceRequired(source, 'green:0,image:30', 'green:0,image:70');
-    source = replaceRequired(source, "?saved.theme:'default'", "?saved.theme:'image'");
+    if (!/green:0,image:\d+/.test(source)) throw new Error('Pinned Web appearance defaults changed');
+    source = source.replace(/green:0,image:\d+/, 'green:0,image:70');
+    if (source.includes("?saved.theme:'default'")) source = source.replace("?saved.theme:'default'", "?saved.theme:'image'");
+    else if (!source.includes("?saved.theme:'image'")) throw new Error('Pinned Web appearance theme changed');
   }
   if (file === 'shell/themes.css') source = source.replaceAll('url("/assets/', `url("${base}/assets/`);
   if (file === 'library/library-transfer.js') {

@@ -5,6 +5,7 @@ import { CloudError } from './accounts.mjs';
 import { ExtensionReviews } from './extension-review.mjs';
 import { loadRuntime } from './runtime.mjs';
 import { CloudPractice } from './practice.mjs';
+import { mergeWorkspace } from './workspace.mjs';
 
 const uuid = value => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
 const MAX_INSTALLED = 192 * 1024 ** 2;
@@ -21,7 +22,7 @@ export function treeBytes(directory, { ignoreTemp = false, ignorePlatform = fals
   visit(directory); return bytes;
 }
 export class CloudLibrary {
-  static async create(db, accounts, dataDir, runtimeDirectory) {
+  static async create(db, accounts, dataDir, runtimeDirectory, { unifiedWorkspace = false } = {}) {
     const runtime = await loadRuntime(runtimeDirectory), review = new ExtensionReviews(db, runtime.manifest.builtins);
     const result = new CloudLibrary(db, accounts, dataDir, runtime, review);
     let engine;
@@ -34,6 +35,7 @@ export class CloudLibrary {
       validationEnvironment: () => engine.validationEnvironment(), background: fn => engine.background(fn),
     };
     result.practice = new CloudPractice(result);
+    result.unifiedWorkspace = unifiedWorkspace;
     return result;
   }
   constructor(db, accounts, dataDir, runtime, reviews) {
@@ -52,6 +54,7 @@ export class CloudLibrary {
     }
     fs.writeFileSync(this.lock, JSON.stringify({ pid: process.pid, nonce: this.nonce }), { flag: 'wx', mode: 0o600 });
     db.exec(`CREATE TABLE IF NOT EXISTS cloud_imports (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), actor_id TEXT NOT NULL REFERENCES users(id), status TEXT NOT NULL, reservation_id TEXT, title TEXT NOT NULL, bytes INTEGER NOT NULL, catalog TEXT NOT NULL, source TEXT NOT NULL, created INTEGER NOT NULL)`);
+    db.exec('CREATE TABLE IF NOT EXISTS cloud_workspace_members(import_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,workspace_id TEXT NOT NULL,source TEXT NOT NULL,catalog TEXT NOT NULL)');
     this.trash = path.join(this.root, 'trash'); fs.mkdirSync(this.trash, { recursive: true, mode: 0o700 });
     for (const row of db.prepare("SELECT * FROM cloud_imports WHERE status='deleting'").all()) {
       const target = this.location(row.user_id, row.id), trash = path.join(this.trash, row.id);
@@ -71,6 +74,8 @@ export class CloudLibrary {
   }
   location(userId, importId) {
     if (!uuid(userId) || !uuid(importId)) throw new CloudError(400, '无效的云端题库编号');
+    const alias = this.db.prepare('SELECT workspace_id FROM cloud_workspace_members WHERE import_id=? AND user_id=?').get(importId, userId);
+    if (alias) importId = alias.workspace_id;
     return path.join(this.users, userId, importId);
   }
   remove(directory) {
@@ -83,11 +88,14 @@ export class CloudLibrary {
   }
   owned(userId, id) {
     if (!uuid(id)) throw new CloudError(404, '云端题库不存在');
+    const alias = this.db.prepare('SELECT workspace_id FROM cloud_workspace_members WHERE import_id=? AND user_id=?').get(id, userId);
+    if (alias) id = alias.workspace_id;
     return this.db.prepare("SELECT * FROM cloud_imports WHERE id=? AND user_id=? AND status='ready'").get(id, userId) || (() => { throw new CloudError(404, '云端题库不存在'); })();
   }
   async install(userId, actorId, input, filename, source = { kind: 'private' }) {
     this.accounts.ensure(userId); this.accounts.ensure(actorId);
     if (userId !== actorId && !this.db.prepare('SELECT admin FROM users WHERE id=?').get(actorId)?.admin) throw new CloudError(403, '仅管理员可向指定用户导入题库');
+    if (this.unifiedWorkspace && source.kind !== 'builtin-demo') return this.appendToWorkspace(userId, actorId, input, filename, source);
     if (this.active) throw new CloudError(503, '另一份云端题库正在导入，请稍后再试');
     if (this.db.prepare("SELECT COUNT(*) AS n FROM cloud_imports WHERE user_id=? AND status='ready'").get(userId).n >= 100) throw new CloudError(413, '当前账户已达到 100 份导入上限');
     if (typeof filename !== 'string' || !filename.toLowerCase().endsWith('.qbank') || filename.length > 240) throw new CloudError(400, '请选择 .qbank 文件');
@@ -146,15 +154,63 @@ export class CloudLibrary {
     return this.installFile(userId, userId, path.join(this.runtime.root, 'basic-demo.qbank'), '基础题型示例.qbank', { kind: 'builtin-demo' });
   }
   async ensureDemo(userId) {
-    const existing = this.list(userId).find(item => item.source.kind === 'builtin-demo');
-    if (existing) return existing;
+    const existing = this.list(userId).findLast(item => item.source.kind === 'builtin-demo');
+    if (existing) return this.unifiedWorkspace ? this.consolidate(userId, existing.id) : existing;
     if (!this.defaultImports.has(userId)) {
       if (this.defaultImports.size >= 16) throw new CloudError(503, '正在准备其他用户的基础题库，请稍后刷新');
-      const next = this.defaultImportTail.then(() => this.list(userId).find(item => item.source.kind === 'builtin-demo') || this.demo(userId));
+      const next = this.defaultImportTail.then(() => this.list(userId).findLast(item => item.source.kind === 'builtin-demo') || this.demo(userId));
       this.defaultImportTail = next.catch(() => {});
       this.defaultImports.set(userId, next.finally(() => this.defaultImports.delete(userId)));
     }
-    return this.defaultImports.get(userId);
+    const item = await this.defaultImports.get(userId);
+    return this.unifiedWorkspace ? this.consolidate(userId, item.id) : item;
+  }
+  async consolidate(userId, workspaceId) {
+    return this.practice.serial(async () => {
+      const workspace = this.owned(userId, workspaceId), others = this.db.prepare("SELECT * FROM cloud_imports WHERE user_id=? AND status='ready' AND id<>? ORDER BY created,id").all(userId, workspace.id);
+      if (others.length) {
+        for (const row of [workspace, ...others]) { const service = this.practice.sessions.get(row.id); if (service) { await service.close(); this.practice.sessions.delete(row.id); } }
+        await this.practice.checkpoint(workspace, async () => ({ mergedRows: others, catalogUpdate: await mergeWorkspace(this, workspace, others) }));
+      }
+      return this.list(userId).find(item => item.id === workspace.id);
+    });
+  }
+  findHubImport(userId, packId, revision) {
+    const items = this.list(userId);
+    const members = this.db.prepare("SELECT workspace_id,catalog FROM cloud_workspace_members WHERE user_id=? AND json_extract(source,'$.kind')='hub' AND json_extract(source,'$.packId')=? AND json_extract(source,'$.revision')=?").all(userId, packId, revision);
+    for (const member of members) {
+      const workspace = items.find(item => item.id === member.workspace_id), bankIds = new Set((JSON.parse(member.catalog).banks || []).map(bank => bank.id));
+      const bank = workspace?.banks.find(bank => bankIds.has(bank.id));
+      if (bank) return { ...workspace, importedBankId: bank.id };
+    }
+    const existing = items.find(item => item.source.kind === 'hub' && item.source.packId === packId && item.source.revision === revision);
+    return existing ? { ...existing, importedBankId: existing.banks[0]?.id } : undefined;
+  }
+  async appendToWorkspace(userId, actorId, input, filename, source) {
+    if (typeof filename !== 'string' || !filename.toLowerCase().endsWith('.qbank') || filename.length > 240) throw new CloudError(400, '请选择 .qbank 文件');
+    const workspace = await this.ensureDemo(userId);
+    return this.practice.serial(async () => {
+      if (source.kind === 'hub' && !source.newCopy && this.findHubImport(userId, source.packId, source.revision)) throw new CloudError(409, '此版本已在云端，请打开已有题库');
+      const row = this.owned(userId, workspace.id), root = this.location(userId, row.id), r = this.runtime;
+      const active = this.practice.sessions.get(row.id); if (active) { await active.close(); this.practice.sessions.delete(row.id); }
+      let importedBankId;
+      await this.practice.checkpoint(row, async () => {
+        const archive = new r.LibraryArchive(root, new r.ResourceStore(root));
+        const result = await archive.importPackage(input, async staging => {
+          for (const directory of r.scanExtensions(path.join(staging, 'extensions'))) this.reviews.verify(directory);
+          const candidate = new r.Library(staging, r.core, this.engine); try { await r.validateImportLibrary(candidate); } finally { candidate.close(); }
+        }, filename);
+        const library = new r.Library(root, r.core, this.engine);
+        let catalog; try { catalog = await library.catalog(); } finally { library.close(); }
+        const previousIds = new Set(JSON.parse(row.catalog).banks.map(bank => bank.id)), banks = catalog.banks.filter(bank => !previousIds.has(bank.id));
+        importedBankId = banks[0]?.id;
+        return { catalogUpdate: catalog, workspaceMember: { id: randomUUID(), source, result: { ...result, banks } }, ...(source.kind === 'admin-delivery' ? { deliveryAudit: { actorId, filename } } : {}) };
+      });
+      return { ...this.list(userId).find(item => item.id === row.id), importedBankId };
+    }).catch(error => {
+      if (error instanceof CloudError) throw error;
+      throw new CloudError(error.status && error.status < 500 ? error.status : 422, error.status && error.status < 500 ? error.message : '云端题库导入失败，原有题库与作答未修改');
+    });
   }
   async export(userId, importId, selection = null) {
     return this.practice.serial(() => this.exportSelection(userId, importId, selection));
@@ -178,22 +234,24 @@ export class CloudLibrary {
   }
   async delete(userId, importId) {
     return this.practice.serial(async () => {
-      const row = this.owned(userId, importId), target = this.location(userId, importId), trash = path.join(this.trash, importId);
-      const active = this.practice.sessions.get(importId);
-      if (active) { await active.close(); this.practice.sessions.delete(importId); }
-      this.db.prepare("UPDATE cloud_imports SET status='deleting' WHERE id=?").run(importId);
+      const row = this.owned(userId, importId), target = this.location(userId, row.id), trash = path.join(this.trash, row.id);
+      if (row.id !== importId) throw new CloudError(409, '此题库已合并到工作区，请在题库列表中删除指定题库');
+      const active = this.practice.sessions.get(row.id);
+      if (active) { await active.close(); this.practice.sessions.delete(row.id); }
+      this.db.prepare("UPDATE cloud_imports SET status='deleting' WHERE id=?").run(row.id);
       let moved = false, committed = false;
       try {
         fs.renameSync(target, trash); moved = true;
         this.accounts.transaction(() => {
           this.accounts.removeStorage(userId, row.bytes, { transaction: false });
-          this.db.prepare('DELETE FROM cloud_imports WHERE id=?').run(importId);
+          this.db.prepare('DELETE FROM cloud_workspace_members WHERE workspace_id=? AND user_id=?').run(row.id, userId);
+          this.db.prepare('DELETE FROM cloud_imports WHERE id=?').run(row.id);
         });
         committed = true; this.remove(trash); return { deleted: true };
       } finally {
         if (!committed) {
           if (moved) fs.renameSync(trash, target);
-          this.db.prepare("UPDATE cloud_imports SET status='ready' WHERE id=?").run(importId);
+          this.db.prepare("UPDATE cloud_imports SET status='ready' WHERE id=?").run(row.id);
         }
       }
     });

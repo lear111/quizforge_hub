@@ -29,7 +29,7 @@ export function cloudRoute({ accounts, library, reviewPackages, requireUser, req
       throttle(req, 'cloud-import', 6, user.id); const input = await bodyJson(req);
       if (Object.keys(input).some(key => !['packId', 'revision', 'newCopy'].includes(key)) || input.newCopy !== undefined && typeof input.newCopy !== 'boolean') throw new CloudError(400, '公共题库导入参数无效');
       const lib = requireLibrary();
-      const existing = lib.list(user.id).find(item => item.source.kind === 'hub' && item.source.packId === input.packId && item.source.revision === input.revision);
+      const existing = lib.findHubImport(user.id, input.packId, input.revision);
       if (existing && !input.newCopy) { json(res, 200, { item: existing, alreadyInstalled: true }); return true; }
       const pack = await resolveCloudPack(input.packId, input.revision);
       try { json(res, 201, { item: await lib.installFile(user.id, user.id, pack.file, pack.filename, { ...pack.source, newCopy: !!input.newCopy }) }); }

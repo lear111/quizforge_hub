@@ -14,7 +14,7 @@ const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', ()
 const stop = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
 const alice = { id: '11111111-1111-4111-8111-111111111111', name: '合成用户', email: 'synthetic@example.test', admin: 0 };
 const bob = { id: '22222222-2222-4222-8222-222222222222', name: '另一用户', email: 'other@example.test', admin: 0 };
-const snapshot = fileURLToPath(new URL('../.runtime/web-current', import.meta.url));
+const snapshot = (process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url)));
 
 test('Hub login handoff binds browser state, uses one-time short-lived codes, checks revocation and logs out centrally', async t => {
   let active = true, now = Date.now(), logout = 0;
@@ -88,7 +88,7 @@ test('Hub login handoff binds browser state, uses one-time short-lived codes, ch
 
 test('ordinary cloud home creates the basic bank once per user, keeps private state and leaves daily quota available for downloads', { skip: !fs.existsSync(snapshot) }, async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'qfh-ordinary-'));
-  const { server } = await createApp({ dataDir: directory, cloudEnabled: true, cloudRuntimeDir: snapshot, practiceHome: true, mailProvider: { ready: false },
+  const { server, cloudLibrary } = await createApp({ dataDir: directory, cloudEnabled: true, cloudRuntimeDir: snapshot, practiceHome: true, mailProvider: { ready: false },
     identityProvider: async req => req.headers.cookie === 'synthetic=alice' ? alice : req.headers.cookie === 'synthetic=bob' ? bob : null,
     cloud: { defaults: { storageBytes: 32 * 1024 ** 2, dailyTrafficBytes: 1024 ** 2, monthlyTrafficBytes: 0 } },
   });
@@ -134,7 +134,8 @@ test('ordinary cloud home creates the basic bank once per user, keeps private st
   changed = await manage({ kind: 'bank', target: 'item', action: 'update', path: catalog.banks[0].path, name: '云端重命名题库', group: '我的练习' }); assert.equal(changed.status, 200); catalog = (await changed.json()).catalog;
   assert.equal(catalog.banks[0].id, item.banks[0].id); assert.equal(catalog.banks[0].group, '我的练习');
   const preserved = await (await request(question)).json(); assert.equal(preserved.state.status, 'submitted'); assert.equal(preserved.state.revision, 1);
-  assert.equal((await manage({ kind: 'extension', target: 'group', action: 'delete', path: '基础题型' })).status, 403);
+  changed = await manage({ kind: 'extension', target: 'group', action: 'create', path: '', name: '空白拓展组', group: '' }); assert.equal(changed.status, 403);
+  changed = await manage({ kind: 'extension', target: 'group', action: 'delete', path: index.groups.extensions[0] }); assert.equal(changed.status, 409);
   assert.equal((await manage({ kind: 'bank', target: 'item', action: 'update', path: '../extensions', name: 'unsafe', group: '' })).status, 400);
   assert.equal((await manage({ kind: 'bank', target: 'item', action: 'update', path: catalog.banks[0].path, name: 'cross-user', group: '' }, 'bob')).status, 404);
   assert.equal((await request(apiBase + '/api/settings/network')).status, 403);
@@ -149,4 +150,9 @@ test('ordinary cloud home creates the basic bank once per user, keeps private st
   for (const [file, content] of [['appearance.mjs', appearance], ['settings.mjs', fs.readFileSync(new URL('../public/cloud/experience.js', import.meta.url))]]) { fs.writeFileSync(path.join(directory, file), content); execFileSync(process.execPath, ['--check', path.join(directory, file)]); }
   const transfer = await (await request(pageUrl + 'library/library-transfer.js')).text(); assert.match(transfer, /downloadCloudSelection/); assert.match(transfer, /export-selection/);
   fs.writeFileSync(path.join(directory, 'transfer.mjs'), transfer); execFileSync(process.execPath, ['--check', path.join(directory, 'transfer.mjs')]);
+  cloudLibrary.unifiedWorkspace = false; const legacy = await cloudLibrary.demo(alice.id); cloudLibrary.unifiedWorkspace = true;
+  const oldPage = await request('/cloud/practice/' + legacy.id + '/?imported-bank=' + encodeURIComponent(legacy.banks[0].id));
+  assert.equal(oldPage.status, 303); assert.equal(oldPage.headers.get('location'), pageUrl + '?imported-bank=' + encodeURIComponent(legacy.banks[0].id));
+  assert.equal(cloudLibrary.list(alice.id).length, 1); assert.equal(cloudLibrary.list(alice.id)[0].banks.length, 2);
+  assert.equal((await (await request(question)).json()).state.status, 'submitted');
 });

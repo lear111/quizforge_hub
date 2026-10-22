@@ -10,11 +10,14 @@ export async function loadRuntime(directory) {
   if (loaded.has(root)) return loaded.get(root);
   const pending = (async () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(root, 'snapshot.json'), 'utf8'));
+    const target = manifest.runtimeTarget;
+    if (target && (target.platform !== process.platform || target.arch !== process.arch || target.libc && target.libc !== (process.report.getReport().header.glibcVersionRuntime ? 'glibc' : 'musl'))) throw new Error('Cloud runtime was built for a different operating system, CPU or libc');
     if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.inventory) || !Array.isArray(manifest.builtins) || manifest.inventory.length > 5000) throw new Error('Invalid cloud runtime snapshot');
     for (const entry of manifest.inventory) {
       if (typeof entry.path !== 'string' || path.isAbsolute(entry.path) || entry.path.includes('\\') || entry.path.split('/').includes('..')) throw new Error('Invalid runtime inventory path');
       const file = path.join(root, entry.path), stat = fs.lstatSync(file);
-      if (!stat.isFile() || fs.realpathSync(file) !== file || stat.size > 32 * 1024 ** 2 || createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== entry.sha256) throw new Error('Cloud runtime snapshot changed; stage a new snapshot');
+      const maxBytes = /^core\/node_modules\/@napi-rs\/canvas-[^/]+\/skia\.[^/]+\.node$/.test(entry.path) ? 64 * 1024 ** 2 : 32 * 1024 ** 2;
+      if (!stat.isFile() || fs.realpathSync(file) !== file || stat.size > maxBytes || createHash('sha256').update(fs.readFileSync(file)).digest('hex') !== entry.sha256) throw new Error('Cloud runtime snapshot changed; stage a new snapshot');
     }
     const core = path.join(root, 'core');
     const module = name => import(pathToFileURL(path.join(core, 'server/host', name)).href);
