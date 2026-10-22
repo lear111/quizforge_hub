@@ -1,6 +1,6 @@
-# Hub 账号连接与官方 AI 评分协议 v1（草案）
+# Hub 账号连接与官方 AI 评分协议 v1
 
-日期：2026-10-22。状态：**草案，待用户确认后实现**。本文是 Hub、Web、Android 三端共用的契约：Hub 先实现并部署（默认关闭），Web 接入后再在下一批同步中接入 Android。各端实现时记录所依据的本文提交。
+日期：2026-10-22。状态：**用户已于 2026-10-22 确认，进入实现**。本文是 Hub、Web、Android 三端共用的契约：Hub 先实现并部署（默认关闭），Web 接入后再在下一批同步中接入 Android。各端实现时记录所依据的本文提交。
 
 ## 1. 目标与范围
 
@@ -93,7 +93,7 @@ Content-Type: application/json
 
 ```json
 {"user":{"name":"…"},"device":{"id":"…","name":"…","client":"web"},
- "ai":{"enabled":true,"model":"通义千问（视觉）","vision":true,"dailyLimit":20,"usedToday":3,"resetAt":"2026-10-23T00:00:00+08:00"}}
+ "ai":{"enabled":true,"model":"通义千问 qwen-vl-plus","vision":true,"dailyLimit":20,"usedToday":3,"resetAt":"2026-10-23T00:00:00+08:00"}}
 ```
 
 - `POST /api/connect/logout`：撤销当前设备连接，返回 204。客户端无论成功与否都删除本地令牌。
@@ -112,7 +112,7 @@ Content-Type: application/json
 
 服务器端约束：
 
-- `model` 必须为 `quizforge-official`，实际模型由服务器配置决定（v1 为通义千问视觉模型，具体型号见第 8 节）。
+- `model` 必须为 `quizforge-official`，实际模型由服务器配置决定（v1 为 `qwen-vl-plus`，见第 8 节）。
 - 只接受 `messages`、`max_tokens`、`response_format`、`temperature`。拒绝 `stream`、`tools`、`functions`、`n>1` 及其他字段，返回 400 `AI_REQUEST_UNSUPPORTED`。
 - `max_tokens` 上限 8192，缺省为 8192。
 - 图片只接受 `image_url` 中的 `data:image/(png|jpeg|webp);base64,…`，不接受外部 URL。单张不超过 4 MiB，一次请求总大小不超过 12 MiB。
@@ -166,10 +166,10 @@ Content-Type: application/json
 | --- | --- | --- |
 | `OFFICIAL_AI_ENABLED` | 总开关，默认关闭 | `0` |
 | `OFFICIAL_AI_BASE_URL` | 上游 OpenAI 兼容地址 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `OFFICIAL_AI_MODEL` | 上游模型名 | 通义千问视觉模型，具体型号待定 |
+| `OFFICIAL_AI_MODEL` | 上游模型名 | `qwen-vl-plus` |
 | `OFFICIAL_AI_KEY` | 上游 API Key，放在 `/etc/quizforge-hub/official-ai.env` | — |
-| `OFFICIAL_AI_DAILY_LIMIT` | 每个账号每天的调用次数 | 待定 |
-| `OFFICIAL_AI_MONTHLY_TOKENS` | 全站每月 token 预算 | 待定 |
+| `OFFICIAL_AI_DAILY_LIMIT` | 每个账号每天的调用次数 | `20` |
+| `OFFICIAL_AI_MONTHLY_TOKENS` | 全站每月 token 预算 | `10000000`（1000 万） |
 
 ## 9. 安全要点
 
@@ -185,8 +185,7 @@ Content-Type: application/json
 2. Web：实现第 7.1 节，发布新预览版。
 3. Android：在下一批同步中按第 7.2 节接入。
 
-## 11. 待确认
+## 11. 已确认与待办
 
-- 通义千问视觉模型的具体型号（影响效果和费用）。
-- `OFFICIAL_AI_DAILY_LIMIT` 和 `OFFICIAL_AI_MONTHLY_TOKENS` 的数值。
-- 面向公众提供生成式 AI 服务是否需要办理相关备案，由运营者自行确认。
+- 2026-10-22 用户确认：模型 `qwen-vl-plus`，每账号每天 20 次，全站每月 1000 万 token。
+- 待办：面向公众提供生成式 AI 服务是否需要办理相关备案，由运营者自行确认。
