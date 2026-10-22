@@ -16,7 +16,7 @@
 
 不使用计时器、隐藏 iframe、循环尝试、localhost 探测或跨站回调推断安装、下载或导入结果。云端和本地入口仅针对已审核公开 `.qbank`；作者、管理员查看待审核或驳回附件时不能绕过该限制。其他格式保留原有文件下载权限。
 
-安装区明确显示“安装／升级 Windows 版”和“Android 安装包待发布”。Windows 使用已有 `/` 下载指引；Android 当前没有链接，待正式发布地址及签名确定后再配置。未提供 `assetlinks.json`，未声称自定义 scheme 获得域名验证。
+安装区明确显示“Windows 版下载”和“Android 安装包待发布”。Windows 使用 Web README 已公布的官方 GitHub Releases，在新标签页打开，保留当前题库页面；Android 当前没有链接，待正式发布地址及签名确定后再配置。未提供 `assetlinks.json`，未声称自定义 scheme 获得域名验证。
 
 导入说明和状态置于独立容器，避免手机样式中隐藏直属 `.download-note` 的规则将它们隐藏。按钮插入顺序兼容本地增强和云端 MutationObserver 的先后顺序，重复增强不增加副本按钮。
 

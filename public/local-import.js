@@ -26,8 +26,8 @@ export function enhanceLocalImport({ document, pack, config }) {
   option.append(open, description, status); download.after(option);
   download.textContent = '下载题库文件'; download.classList.add('secondary');
   const installers = document.createElement('div'); installers.className = 'download-installers';
-  const install = document.createElement('a'); install.href = '/'; install.className = 'text-button';
-  install.textContent = '安装／升级 Windows 版';
+  const install = document.createElement('a'); install.href = 'https://github.com/lear111/quizforge_web/releases'; install.className = 'text-button'; install.target = '_blank'; install.rel = 'noopener noreferrer';
+  install.textContent = 'Windows 版下载';
   // Android release URL and signing identity are not configured yet. Do not
   // guess an APK address or send Android users to the Windows download.
   const android = document.createElement('span'); android.className = 'download-note'; android.textContent = 'Android 安装包待发布';

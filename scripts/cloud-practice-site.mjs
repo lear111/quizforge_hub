@@ -17,7 +17,7 @@ const app = await createApp({
   dataDir: process.env.DATA_DIR, cloudEnabled: true, cloudRuntimeDir: process.env.CLOUD_RUNTIME_DIR,
   resolveCloudPack: createHubSource({ origin: hubOrigin, dataDir: process.env.DATA_DIR }),
   reportActivity,
-  downloadNotice: false, secureCookies: true, publicOrigin: practiceOrigin, practiceHome: true,
+  secureCookies: true, publicOrigin: practiceOrigin, practiceHome: true,
   mailProvider: { ready: false }, beforeRequest: async (req, res, url) => {
     if (await login.handle(req, res, url)) return true;
     if (url.pathname === '/cloud/import' && req.method === 'GET') {

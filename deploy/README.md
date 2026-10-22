@@ -22,4 +22,4 @@ sudo -u quizforge env DATA_DIR=/var/lib/quizforge-hub /opt/quizforge-node/bin/no
 
 审核版本升级前先一致性备份 SQLite 和附件，保留旧发布目录。新版本首次启动会将旧题库转为待审；旧版本没有访问限制，迁移后不得直接回退旧版本继续公开服务。设置 `REVIEW_EMAIL` 和已审核的 `TENCENT_SES_REVIEW_TEMPLATE_ID` 后重启，再检查管理员页的提醒状态。
 
-临时下载页：在私有环境文件配置 `DOWNLOAD_NOTICE_ENABLED=1`、`DOWNLOAD_NOTICE_URL` 和 `DOWNLOAD_NOTICE_CODE` 后重启。原社区入口为 `/manage/`，审核入口为 `/manage/#reviews`，后台权限规则保持原样。恢复原首页时关闭 `DOWNLOAD_NOTICE_ENABLED`。切换首页不停止后端 API，也不取代完整数据备份。
+首页源码现已固定为题库广场，`/` 与 `/manage/` 加载相同页面，已有 `/manage/#library`、`/manage/#reviews` 及练习登录返回路径保持兼容。临时网盘页和专用资源已移除，旧 `DOWNLOAD_NOTICE_ENABLED`、`DOWNLOAD_NOTICE_URL`、`DOWNLOAD_NOTICE_CODE` 不再读取。已有服务器配置可以保留这些变量，但不再影响首页；后续经授权发布时按正常流程备份及核对配置，不迁移本机数据。本次源码调整未部署，不代表线上已生效。

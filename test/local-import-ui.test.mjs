@@ -53,7 +53,9 @@ test('three destinations stay ordered and do not duplicate across enhancement or
     assert.equal(ui.descendants().find(node => node.id === cloud.attributes['aria-describedby']).textContent, '导入账号的云端题库，需登录。');
     const installer = ui.descendants().find(node => node.className === 'download-installers');
     assert.equal(ui.root.children.at(-1), installer);
-    assert.deepEqual(installer.children.filter(node => node.tagName === 'a').map(node => [node.textContent, node.href]), [['安装／升级 Windows 版', '/']]);
+    const windows = installer.children.find(node => node.tagName === 'a');
+    assert.equal(windows.textContent, 'Windows 版下载'); assert.equal(windows.href, 'https://github.com/lear111/quizforge_web/releases');
+    assert.equal(windows.target, '_blank'); assert.equal(windows.rel, 'noopener noreferrer');
     assert.ok(installer.children.some(node => node.textContent === 'Android 安装包待发布' && !node.href));
     assert.match(installer.textContent, /未安装客户端或浏览器未唤起/);
   }
