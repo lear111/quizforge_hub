@@ -8,9 +8,8 @@
     <button type="button" class="qa-nav" data-page="banks">题库管理</button>
     <button type="button" class="qa-nav" data-page="private">私人拓展验证</button>
     <button type="button" class="qa-nav" data-page="trust">拓展白名单</button>
-    <small class="qa-nav-group">AI 服务</small>
-    <button type="button" class="qa-nav qa-subnav" data-page="ai-keys">API Key 管理</button>
-    <button type="button" class="qa-nav qa-subnav" data-page="ai-codes">兑换码管理</button>
+    <button type="button" class="qa-nav qa-nav-toggle" id="ai-nav-toggle" aria-expanded="false" aria-controls="ai-nav-items">AI 服务<span class="qa-chevron" aria-hidden="true"></span></button>
+    <div class="qa-subnav-group" id="ai-nav-items" hidden><button type="button" class="qa-nav qa-subnav" data-page="ai-keys">API Key 管理</button><button type="button" class="qa-nav qa-subnav" data-page="ai-codes">兑换码管理</button></div>
     <button type="button" class="qa-nav" data-page="audit">操作日志</button>
   </nav><main class="qa-main" aria-label="后台内容"></main></div>
   <div class="qa-toast" role="status" aria-live="polite">正在验证管理员身份…</div>

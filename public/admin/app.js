@@ -26,11 +26,17 @@ async function upload(route, file) {
 }
 const toast = message => { notice.textContent = message; };
 const aiPages = createAiPages({ root, main, api, toast, rerender: () => render() });
+// The AI 服务 sidebar group opens and closes on click, opens itself on its own pages, and remembers being open.
+const aiToggle = root.querySelector('#ai-nav-toggle'), aiItems = root.querySelector('#ai-nav-items');
+function setAiNav(open, remember = true) { aiToggle.setAttribute('aria-expanded', String(open)); aiItems.hidden = !open; if (remember) try { localStorage.setItem('qfa-ai-nav', open ? '1' : '0'); } catch { /* not remembered */ } }
+try { setAiNav(localStorage.getItem('qfa-ai-nav') === '1', false); } catch { setAiNav(false, false); }
+aiToggle.addEventListener('click', () => setAiNav(aiItems.hidden));
 function navigate(page) { state.job = null; state.reviewPack = null; state.action = null; location.hash = page; if (state.page === page) render(); }
 function errorView(error) { main.innerHTML = heading('暂时无法打开', esc(error.message), button('retry', '重试')); if (error.status === 401 || error.status === 403) main.insertAdjacentHTML('beforeend', '<a class="qa-btn" href="/manage/#admin">重新登录管理员账号</a>'); }
 async function render() {
   const stamp = ++epoch, hash = location.hash.slice(1) === 'official-ai' ? 'ai-keys' : location.hash.slice(1); state.page = ['overview', 'invitations', 'users', 'banks', 'private', 'trust', 'ai-keys', 'ai-codes', 'audit'].includes(hash) ? hash : 'overview';
-  if (!state.page.startsWith('ai-')) aiPages.leave();
+  if (!state.page.startsWith('ai-')) aiPages.leave(); else if (aiItems.hidden) setAiNav(true);
+  aiToggle.classList.toggle('qa-nav-active', state.page.startsWith('ai-'));
   for (const nav of root.querySelectorAll('[data-page]')) { if (nav.dataset.page === state.page) nav.setAttribute('aria-current', 'page'); else nav.removeAttribute('aria-current'); }
   main.innerHTML = '<p role="status">正在读取数据…</p>';
   try {
