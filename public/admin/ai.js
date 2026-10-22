@@ -23,17 +23,21 @@ export function createAiPages({ root, main, api, toast }) {
   const rerender = async () => { if (!page) return; const name = page.name, html = name === 'ai-codes' ? await codesPage() : await keysPage(); if (page?.name === name) main.innerHTML = html; };
 
   function metric(label, value, note = '') { return `<section class="qa-metric"><span>${label}</span><strong>${value}</strong>${note ? `<small>${note}</small>` : ''}</section>`; }
+  const shortTime = value => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  const sub = text => `<small class="qa-sub">${text}</small>`;
   function keyRow(item, index) {
     const [label, kind] = STATES[item.state] || ['未知', ''];
-    const reason = item.state === 'fault' || item.state === 'insufficient' ? `<small class="qa-muted qa-block">${esc(item.reason || '')}${item.statusAt ? ' · ' + esc(dateTime(item.statusAt)) : ''}</small>` : '';
+    const detail = item.state === 'fault' || item.state === 'insufficient' ? esc(item.reason || '') + (item.statusAt ? ' · ' + esc(shortTime(item.statusAt)) : '')
+      : item.state === 'expired' ? '到期 ' + day(item.expires) : item.expires ? '到期 ' + day(item.expires) : '无期限';
     return `<tr draggable="true" data-key="${item.id}">
-      <td class="qa-order"><span class="qa-grip" title="拖动调整顺序" aria-hidden="true">⋮⋮</span><button type="button" class="qa-link" data-ai="up" data-id="${item.id}" ${index === 0 ? 'disabled' : ''} aria-label="上移">↑</button><button type="button" class="qa-link" data-ai="down" data-id="${item.id}" ${index === keys.length - 1 ? 'disabled' : ''} aria-label="下移">↓</button></td>
-      <td>${item.seq}</td><td><code>${esc(item.keyHint)}</code></td><td>${esc(item.note || '—')}<small class="qa-muted qa-block">${esc(item.host)}</small></td><td>${esc(item.model)}</td>
-      <td>¥${plain(item.inputPrice)}</td><td>¥${plain(item.outputPrice)}</td><td>${item.calls.toLocaleString('zh-CN')}</td>
-      <td>${item.remaining === null ? '不限' : yuan(item.remaining)}</td><td>${day(item.created)}<small class="qa-muted qa-block">${item.expires ? day(item.expires) : '无期限'}</small></td>
+      <td class="qa-order"><span class="qa-grip" title="拖动调整顺序" aria-hidden="true">⠿</span><strong>${item.seq}</strong><span class="qa-move"><button type="button" class="qa-link" data-ai="up" data-id="${item.id}" ${index === 0 ? 'disabled' : ''} aria-label="上移">↑</button><button type="button" class="qa-link" data-ai="down" data-id="${item.id}" ${index === keys.length - 1 ? 'disabled' : ''} aria-label="下移">↓</button></span></td>
+      <td class="qa-wrap"><strong>${esc(item.note || '未命名')}</strong>${sub(`<code>${esc(item.keyHint)}</code> · ${esc(item.host)}`)}</td>
+      <td>${esc(item.model)}</td>
+      <td>输入 ¥${plain(item.inputPrice)}${sub('输出 ¥' + plain(item.outputPrice))}</td>
+      <td>${item.remaining === null ? '不限' : yuan(item.remaining)}${sub(`已调用 ${item.calls.toLocaleString('zh-CN')} 次`)}</td>
       <td>${toggle(`data-ai-key-enabled="${item.id}"`, item.enabled, `启用 ${item.seq} 号 Key`)}</td>
-      <td>${badge(label, kind)}${reason}</td>
-      <td class="qa-actions-cell"><button type="button" class="qa-link" data-ai="test" data-id="${item.id}">测试</button> <button type="button" class="qa-link" data-ai="edit" data-id="${item.id}">编辑</button></td></tr>`;
+      <td class="qa-wrap">${badge(label, kind)}${sub(detail)}</td>
+      <td class="qa-row-actions"><button type="button" class="qa-btn qa-small" data-ai="test" data-id="${item.id}">测试</button><button type="button" class="qa-btn qa-small" data-ai="edit" data-id="${item.id}">编辑</button></td></tr>`;
   }
   async function keysPage() {
     const value = await api('/official-ai'); keys = value.keys; page = { name: 'ai-keys', value };
@@ -42,24 +46,25 @@ export function createAiPages({ root, main, api, toast }) {
       <div class="qa-actions"><span class="qa-muted">AI 服务</span>${toggle('data-ai-service', value.enabled, 'AI 服务开关')}<strong>${value.enabled ? '已开启' : '已关闭'}</strong></div></div>
       ${value.encryptionReady ? '' : '<p class="qa-error">服务器尚未配置加密主密钥，不能添加 API Key。</p>'}
       <div class="qa-metrics">${metric('总调用次数', Number(s.totalCalls).toLocaleString('zh-CN'))}${metric('今日使用金额', yuan(s.todayCost, 4))}${metric('总使用金额', yuan(s.totalCost, 4))}${metric('用户余额合计', yuan(s.userBalance))}</div>
-      <section class="qa-panel"><div class="qa-panel-top"><h2>API Key 列表</h2><button type="button" class="qa-btn primary" data-ai="add-key" ${keys.length >= value.maxKeys ? 'disabled' : ''}>新增 API Key</button></div>
-      <div class="qa-scroll"><table class="qa-ai-table"><thead><tr><th>顺序</th><th>编号</th><th>Key</th><th>备注</th><th>模型</th><th>输入单价</th><th>输出单价</th><th>调用次数</th><th>剩余金额</th><th>创建 / 到期</th><th>启用</th><th>状态</th><th>操作</th></tr></thead>
-      <tbody>${keys.length ? keys.map(keyRow).join('') : '<tr><td colspan="13" class="qa-empty">还没有 API Key，点“新增 API Key”添加</td></tr>'}</tbody></table></div></section>`;
+      <section class="qa-panel"><div class="qa-panel-top"><h2>API Key 列表 <small class="qa-sub qa-inline">从上往下依次尝试，拖动 ⠿ 调整顺序</small></h2><button type="button" class="qa-btn primary" data-ai="add-key" ${keys.length >= value.maxKeys ? 'disabled' : ''}>新增 API Key</button></div>
+      <div class="qa-scroll"><table class="qa-ai-table"><thead><tr><th>编号</th><th>备注 / Key</th><th>模型</th><th>单价（元 / 百万）</th><th>剩余金额</th><th>启用</th><th>状态</th><th></th></tr></thead>
+      <tbody>${keys.length ? keys.map(keyRow).join('') : '<tr><td colspan="8" class="qa-empty">还没有 API Key，点“新增 API Key”添加</td></tr>'}</tbody></table></div></section>`;
   }
   function codeRow(item) {
-    const usage = item.state === 'redeemed' ? `${esc(item.redeemedBy || '')} 已兑换` : badge(CODE_STATES[item.state], item.state === 'available' ? 'ok' : '');
-    const copy = item.full ? ` <button type="button" class="qa-link" data-ai="copy" data-code="${esc(item.code)}">复制</button>` : '';
-    return `<tr><td>${item.seq}</td><td><code>${esc(item.code)}</code>${copy}</td><td>${esc(item.note || '—')} <button type="button" class="qa-link" data-ai="note" data-id="${item.id}">编辑</button></td>
-      <td>${day(item.created)}</td><td>${day(item.expires)}</td><td>${yuan(item.amount)}</td><td>${usage}</td>
-      <td>${item.state === 'redeemed' ? '—' : toggle(`data-ai-code-enabled="${item.id}"`, item.enabled, `启用 ${item.seq} 号兑换码`)}</td></tr>`;
+    const usage = item.state === 'redeemed' ? badge('已兑换', '') + sub(`${esc(item.redeemedBy || '')} · ${esc(shortTime(item.redeemed))}`) : badge(CODE_STATES[item.state], { available: 'ok', expired: 'wait' }[item.state] || '');
+    const code = item.full ? `<button type="button" class="qa-code-pill" data-ai="copy" data-code="${esc(item.code)}" title="点击复制"><code>${esc(item.code)}</code><span class="qa-copy" aria-hidden="true">复制</span></button>` : `<span class="qa-code-pill"><code>${esc(item.code)}</code></span>`;
+    return `<tr><td><strong>${item.seq}</strong></td><td>${code}</td>
+      <td class="qa-wrap">${esc(item.note || '—')} <button type="button" class="qa-link" data-ai="note" data-id="${item.id}" aria-label="编辑备注">✎</button></td>
+      <td><strong>${yuan(item.amount)}</strong></td><td>${day(item.created)}${sub('到期 ' + day(item.expires))}</td><td>${usage}</td>
+      <td>${item.state === 'redeemed' ? '<span class="qa-muted">—</span>' : toggle(`data-ai-code-enabled="${item.id}"`, item.enabled, `启用 ${item.seq} 号兑换码`)}</td></tr>`;
   }
   async function codesPage() {
     const value = await api('/ai-codes'); codes = value.items; page = { name: 'ai-codes', value };
     return `<div class="qa-page-top"><div><h1>兑换码管理</h1><p class="qa-muted">用户在 QuizForge 的设置 → 用户中心输入兑换码充值免费 AI 额度，每个码只能用一次。新账号余额为 0。</p></div></div>
       <div class="qa-metrics qa-metrics-2">${metric('兑换码总金额', yuan(value.stats.total))}${metric('已使用兑换码总金额', yuan(value.stats.redeemed))}</div>
       <section class="qa-panel"><div class="qa-panel-top"><h2>兑换码列表</h2><button type="button" class="qa-btn primary" data-ai="add-codes">新增兑换码</button></div>
-      <div class="qa-scroll"><table class="qa-ai-table"><thead><tr><th>编号</th><th>兑换码</th><th>备注</th><th>创建时间</th><th>到期时间</th><th>金额</th><th>使用情况</th><th>启用</th></tr></thead>
-      <tbody>${codes.length ? codes.map(codeRow).join('') : '<tr><td colspan="8" class="qa-empty">还没有兑换码，点“新增兑换码”生成</td></tr>'}</tbody></table></div></section>`;
+      <div class="qa-scroll"><table class="qa-ai-table"><thead><tr><th>编号</th><th>兑换码</th><th>备注</th><th>金额</th><th>创建 / 到期</th><th>使用情况</th><th>启用</th></tr></thead>
+      <tbody>${codes.length ? codes.map(codeRow).join('') : '<tr><td colspan="7" class="qa-empty">还没有兑换码，点“新增兑换码”生成</td></tr>'}</tbody></table></div></section>`;
   }
 
   // Dialogs. `submit` returns false to keep the dialog open (for example to show a result).

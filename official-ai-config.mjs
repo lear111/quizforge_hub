@@ -57,9 +57,10 @@ export function costFor(usage, prices) {
 // faults; only an explicit arrears code or HTTP 402 means the account is out of money.
 export function upstreamFailure(status, text) {
   let code = ''; try { const body = JSON.parse(text); code = String(body?.error?.code ?? body?.code ?? ''); } catch { /* status only */ }
-  if (status !== 429 && (status === 402 || ARREARS.has(code))) return { status: 'insufficient', reason: `厂商返回欠费或额度不足（${code || 'HTTP ' + status}）` };
+  if (status !== 429 && (status === 402 || ARREARS.has(code))) return { status: 'insufficient', reason: `欠费或额度不足（${code || 'HTTP ' + status}）` };
   if (status === 400 && !code.startsWith('InvalidApiKey')) return { status: 'rejected', reason: `请求被拒绝（HTTP 400${code ? ' ' + code : ''}）` };
-  return { status: 'fault', reason: `HTTP ${status}${code ? ' ' + code : ''}` };
+  const what = { 401: 'Key 无效', 403: '没有权限', 404: '地址或模型不存在', 429: '被限流' }[status] || (status >= 500 ? '服务出错' : '请求失败');
+  return { status: 'fault', reason: `${what}（HTTP ${status}${code ? ' ' + code : ''}）` };
 }
 
 export function createOfficialAiConfig({ db, base, master, now = () => Date.now(), fetchImpl = globalThis.fetch }) {
@@ -123,7 +124,7 @@ export function createOfficialAiConfig({ db, base, master, now = () => Date.now(
       if (response.ok) { let body = null; try { body = JSON.parse(text); } catch { /* checked below */ } return Array.isArray(body?.choices) ? { ok: true, ms, status: 'ok', reason: '测试通过' } : { ok: false, ms, status: 'fault', reason: '返回的不是 OpenAI 兼容格式' }; }
       const failure = upstreamFailure(response.status, text);
       return { ok: false, ms, status: failure.status === 'rejected' ? 'fault' : failure.status, reason: failure.reason };
-    } catch { return { ok: false, ms: now() - started, status: 'fault', reason: '无法连接或等待超时' }; }
+    } catch { return { ok: false, ms: now() - started, status: 'fault', reason: '连不上或超时' }; }
   }
   const amount = (value, label, maxValue, nullable) => {
     if (nullable && value === null) return null;

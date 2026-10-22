@@ -99,12 +99,25 @@ html{color-scheme:light dark}body{margin:0;background:light-dark(#faf9fe,#18151f
 .qa-metrics.qa-metrics-2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .qa-block{display:block;margin-top:2px}
 #qf-admin .qa-ai-table th,#qf-admin .qa-ai-table td{padding-left:5px;padding-right:5px}
-.qa-ai-table td{white-space:nowrap}
-.qa-ai-table td:nth-child(4){white-space:normal;min-width:110px}
-.qa-order{white-space:nowrap}
-.qa-grip{cursor:grab;color:var(--qfa-muted);margin-right:4px;letter-spacing:-2px;user-select:none}
-.qa-order .qa-link{padding:2px 4px}
-.qa-order .qa-link:disabled{opacity:.3;cursor:default}
+.qa-ai-table td{white-space:nowrap;vertical-align:top}
+.qa-ai-table td.qa-wrap{white-space:normal;min-width:130px}
+.qa-sub{display:block;margin-top:3px;font-size:11px;color:var(--qfa-muted);font-weight:400}
+.qa-sub.qa-inline{display:inline;margin-left:8px}
+.qa-sub code,.qa-code-pill code{font-family:ui-monospace,Consolas,monospace}
+.qa-order{white-space:nowrap;color:var(--qfa-muted)}
+.qa-order strong{color:var(--qfa-text);margin:0 4px}
+.qa-grip{cursor:grab;user-select:none}
+.qa-move .qa-link{padding:0 3px;visibility:hidden}
+tr:hover .qa-move .qa-link,tr:focus-within .qa-move .qa-link{visibility:visible}
+@media(hover:none){.qa-move .qa-link{visibility:visible}}
+.qa-move .qa-link:disabled{opacity:.25;cursor:default}
+.qa-row-actions{text-align:right}
+.qa-row-actions .qa-btn{margin-left:6px}
+#qf-admin .qa-small{min-height:28px;padding:4px 10px;font-size:12px}
+.qa-code-pill{display:inline-flex;align-items:center;gap:8px;padding:4px 9px;border:1px solid var(--qfa-line);border-radius:7px;background:var(--qfa-bg);color:var(--qfa-text);font-size:12px}
+button.qa-code-pill{cursor:copy}
+button.qa-code-pill:hover{border-color:var(--qfa-purple)}
+.qa-copy{font-size:11px;color:var(--qfa-purple)}
 tr.qa-dragging{background:var(--qfa-soft);opacity:.8}
 .qa-switch{position:relative;display:inline-flex;align-items:center;vertical-align:middle;cursor:pointer}
 #qf-admin .qa-switch input{position:absolute;opacity:0;width:1px;height:1px;padding:0;margin:0}
