@@ -25,7 +25,7 @@ async function upload(route, file) {
   const result = await response.json(); if (!response.ok) throw new Error(result.error || '上传未完成'); return result;
 }
 const toast = message => { notice.textContent = message; };
-const aiPages = createAiPages({ root, main, api, toast, rerender: () => render() });
+const aiPages = createAiPages({ root, main, api, toast });
 // The AI 服务 sidebar group opens and closes on click, opens itself on its own pages, and remembers being open.
 const aiToggle = root.querySelector('#ai-nav-toggle'), aiItems = root.querySelector('#ai-nav-items');
 function setAiNav(open, remember = true) { aiToggle.setAttribute('aria-expanded', String(open)); aiItems.hidden = !open; if (remember) try { localStorage.setItem('qfa-ai-nav', open ? '1' : '0'); } catch { /* not remembered */ } }

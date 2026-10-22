@@ -14,10 +14,13 @@ const CODE_STATES = { available: '未使用', redeemed: '已兑换', expired: '�
 const toggle = (attrs, on, label) => `<label class="qa-switch"><input type="checkbox" role="switch" ${attrs} ${on ? 'checked' : ''} aria-label="${esc(label)}"><span></span></label>`;
 const badge = (label, kind) => `<span class="qa-status ${kind}">${esc(label)}</span>`;
 
-export function createAiPages({ root, main, api, toast, rerender }) {
+export function createAiPages({ root, main, api, toast }) {
   const dialog = document.createElement('dialog');
   dialog.className = 'qa-dialog'; root.append(dialog);
   let keys = [], codes = [], page = null, dragged = null;
+  // Redraws the current page with fresh data in one swap, without the loading placeholder,
+  // so tests, switches and dialogs update in place.
+  const rerender = async () => { if (!page) return; const name = page.name, html = name === 'ai-codes' ? await codesPage() : await keysPage(); if (page?.name === name) main.innerHTML = html; };
 
   function metric(label, value, note = '') { return `<section class="qa-metric"><span>${label}</span><strong>${value}</strong>${note ? `<small>${note}</small>` : ''}</section>`; }
   function keyRow(item, index) {
