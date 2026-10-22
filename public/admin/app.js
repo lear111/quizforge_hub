@@ -15,7 +15,7 @@ let epoch = 0, busy = false;
 async function api(route, { body, method, ...options } = {}) {
   const response = await fetch('/api/admin' + route, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(180000), ...options, ...(body === undefined ? {} : { body: JSON.stringify(body), method: method || 'POST', headers: { 'Content-Type': 'application/json' } }), ...(method ? { method } : {}) });
   const result = await response.json();
-  if (!response.ok) throw Object.assign(new Error(result.error || '请求失败，请稍后重试'), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(result.error?.message || result.error || '请求失败，请稍后重试'), { status: response.status });
   return result;
 }
 async function upload(route, file) {
@@ -27,7 +27,7 @@ const toast = message => { notice.textContent = message; };
 function navigate(page) { state.job = null; state.reviewPack = null; state.action = null; location.hash = page; if (state.page === page) render(); }
 function errorView(error) { main.innerHTML = heading('暂时无法打开', esc(error.message), button('retry', '重试')); if (error.status === 401 || error.status === 403) main.insertAdjacentHTML('beforeend', '<a class="qa-btn" href="/manage/#admin">重新登录管理员账号</a>'); }
 async function render() {
-  const stamp = ++epoch; state.page = ['overview', 'invitations', 'users', 'banks', 'private', 'trust', 'audit'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
+  const stamp = ++epoch; state.page = ['overview', 'invitations', 'users', 'banks', 'private', 'trust', 'official-ai', 'audit'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
   for (const nav of root.querySelectorAll('[data-page]')) { if (nav.dataset.page === state.page) nav.setAttribute('aria-current', 'page'); else nav.removeAttribute('aria-current'); }
   main.innerHTML = '<p role="status">正在读取数据…</p>';
   try {
@@ -37,12 +37,24 @@ async function render() {
     else if (state.page === 'users') { const value = await api('/users?' + new URLSearchParams({ page: state.userPage, q: state.userQuery })); state.users = value.users; state.defaults = value.defaults; html = users(value); }
     else if (state.page === 'banks') { const value = await api('/packs?' + new URLSearchParams({ status: state.bankStatus, page: state.bankPage })); state.packs = value.items; html = banks(value); }
     else if (state.page === 'private') { const { items } = await api('/cloud/submissions'); state.jobs = items; html = privateReview(); }
+    else if (state.page === 'official-ai') { const value = await api('/official-ai'); if (stamp !== epoch) return; html = officialAi(value); }
     else if (state.page === 'trust') { const { entries } = await api('/cloud/extensions'); state.extensions = entries; html = whitelist(); }
     else { const { items } = await api('/audit'); html = heading('操作日志', '记录真实操作者、时间、对象和操作原因') + `<section class="qa-panel">${table(['时间', '操作者', '操作', '对象与详情'], items.map(i => `<tr><td>${date(i.created)}</td><td>${esc(i.actor)}</td><td>${esc(i.action)}</td><td><strong>${esc(i.target)}</strong><details><summary>查看变更</summary><pre class="qa-audit-detail">${esc(JSON.stringify(i.detail, null, 2))}</pre></details></td></tr>`).join(''))}</section>`; }
     if (stamp !== epoch) return; main.innerHTML = html;
     if (state.page === 'overview') drawChart();
     if (state.job && (state.page === 'private' || state.page === 'banks')) showJob();
   } catch (error) { if (stamp === epoch) errorView(error); }
+}
+// Official AI (docs/HUB_CONNECT_AI.md): the key is write-only and changing it needs the admin password.
+function officialAi(value) {
+  const sources = { file: '由服务器配置文件设置（优先级最高，后台不能修改）', admin: '已在后台设置', locked: '已在后台设置，但服务器缺少加密主密钥，暂时无法使用' };
+  const key = value.key.configured || value.key.source === 'locked' ? `${esc(value.key.hint || '已设置')} · ${sources[value.key.source] || ''}` : '未设置';
+  const used = value.monthlyTokens ? Math.min(100, Math.round(value.usage.monthTokens / value.monthlyTokens * 100)) : 0;
+  return heading('官方 AI', '给登录用户提供的官方 AI 评分 · 上游 ' + esc(value.upstreamHost) + '（地址只能在服务器配置中修改）')
+    + `<div class="qa-metrics"><section class="qa-metric"><span>状态</span><strong>${value.enabled && value.key.configured ? '运行中' : '未开启'}</strong><small>${value.enabled ? (value.key.configured ? '用户可以使用官方 AI 评分' : '已开启，但缺少 API Key') : '用户看到“官方 AI 暂未开放”'}</small></section><section class="qa-metric"><span>今日调用</span><strong>${value.usage.todayCalls}</strong><small>${value.usage.todayUsers} 个用户</small></section><section class="qa-metric"><span>本月 token</span><strong>${value.usage.monthTokens.toLocaleString('zh-CN')}</strong><small>预算的 ${used}%</small></section></div>`
+    + `<section class="qa-panel"><h2>设置</h2><form data-form="official-ai"><label class="qa-check"><input type="checkbox" role="switch" name="enabled" ${value.enabled ? 'checked' : ''}> 开启官方 AI</label><div class="qa-fields qa-ops"><label>模型名<input name="model" required maxlength="64" pattern="[A-Za-z0-9._-]+" value="${esc(value.model)}"></label><label>每账号每日次数<input type="number" name="dailyLimit" min="0" max="1000" required value="${value.dailyLimit}"></label><label>全站每月 token 预算<input type="number" name="monthlyTokens" min="0" max="10000000000" required value="${value.monthlyTokens}"></label></div>`
+    + `<h3>API Key</h3><p class="qa-muted">当前：${key}。Key 只能写入，保存后无法再查看${value.encryptionReady ? '；在服务器上加密保存' : '；<strong>服务器尚未配置加密主密钥，不能在后台保存 Key</strong>'}。</p><div class="qa-fields qa-ops"><label>新的 API Key（留空表示不修改）<input type="password" name="apiKey" autocomplete="off" spellcheck="false" maxlength="200" ${value.encryptionReady && value.key.source !== 'file' ? '' : 'disabled'}></label><label class="qa-check"><input type="checkbox" name="clearKey" ${value.key.source === 'admin' || value.key.source === 'locked' ? '' : 'disabled'}> 清除后台保存的 Key</label><label>管理员密码（修改或清除 Key 时必填）<input type="password" name="password" autocomplete="current-password" maxlength="128"></label></div>`
+    + `<p class="qa-muted">${value.updated ? '上次修改：' + date(value.updated) + ' · ' + esc(value.updatedBy || '') : '尚未在后台修改过，当前使用服务器配置文件中的值。'}</p><p class="qa-error" role="alert"></p><div class="qa-ops"><button class="qa-btn primary" type="submit">保存设置</button></div></form></section>`;
 }
 let trend = [];
 function overview(value) {
@@ -122,6 +134,12 @@ root.addEventListener('submit',async event=>{
   const form=event.target;if(!form.matches('form[data-form]'))return;event.preventDefault();if(!form.reportValidity())return;
   if(busy)return;const data=new FormData(form),kind=form.dataset.form,submitter=event.submitter||form.querySelector('[type=submit]');busy=kind!=='search-users';submitter.disabled=true;const originalLabel=submitter.textContent;submitter.textContent='正在处理…';toast('正在处理，请等待结果…');
   try{
+    if(kind==='official-ai'){
+      const body={enabled:data.has('enabled'),model:String(data.get('model')||'').trim(),dailyLimit:Number(data.get('dailyLimit')),monthlyTokens:Number(data.get('monthlyTokens'))};
+      const key=String(data.get('apiKey')||'');if(key)body.apiKey=key;if(data.has('clearKey'))body.clearKey=true;
+      if(body.apiKey||body.clearKey){body.password=String(data.get('password')||'');if(!body.password)throw new Error('修改或清除 API Key 需要输入管理员密码');}
+      await api('/official-ai',{method:'PUT',body});form.reset();await render();toast(body.apiKey?'设置已保存，新的 API Key 已加密保存。':body.clearKey?'设置已保存，后台的 API Key 已清除。':'官方 AI 设置已保存，立即生效。');return;
+    }
     if(kind==='search-users'){state.userQuery=String(data.get('q')||'').trim();state.userPage=1;await render();return;}
     if(kind==='invitation-policy'){const value=await api('/invitations/settings',{method:'PUT',body:{invitationRequired:data.has('invitationRequired')}});await render();toast(value.invitationRequired?'已开启邀请码验证，立即对新注册生效。':'已关闭邀请码验证，注册仍需完成邮箱和人机验证。');return;}
     if(kind==='invitations'){state.newCodes=(await api('/invitations',{body:{count:Number(data.get('count')),days:Number(data.get('days'))}})).items;await render();toast('邀请码已生成，完整码仅在本次页面中保留，请及时保存。');return;}

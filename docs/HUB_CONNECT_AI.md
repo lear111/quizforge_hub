@@ -167,9 +167,21 @@ Content-Type: application/json
 | `OFFICIAL_AI_ENABLED` | 总开关，默认关闭 | `0` |
 | `OFFICIAL_AI_BASE_URL` | 上游 OpenAI 兼容地址 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | `OFFICIAL_AI_MODEL` | 上游模型名 | `qwen-vl-plus` |
-| `OFFICIAL_AI_KEY` | 上游 API Key，放在 `/etc/quizforge-hub/official-ai.env` | — |
+| `OFFICIAL_AI_KEY` | 上游 API Key（可选，推荐改在后台设置；文件中填写时优先） | — |
+| `OFFICIAL_AI_MASTER_KEY` | 后台保存 Key 用的加密主密钥，32 字节 base64，只放在 root 可读的 env 文件中 | 部署时随机生成 |
 | `OFFICIAL_AI_DAILY_LIMIT` | 每个账号每天的调用次数 | `20` |
 | `OFFICIAL_AI_MONTHLY_TOKENS` | 全站每月 token 预算 | `10000000`（1000 万） |
+
+### 8.1 管理后台
+
+管理员可以在后台 **官方 AI** 页面修改开关、模型名、每账号每日次数、每月 token 预算和 API Key，修改立即生效、无需重启。安全约束：
+
+- **加密保存**：API Key 用 AES-256-GCM 加密后存入数据库。主密钥 `OFFICIAL_AI_MASTER_KEY`（32 字节 base64）只放在 root 可读的 `/etc/quizforge-hub/official-ai.env` 里，由 systemd 交给服务。只拿到数据库或数据备份读不出 Key；主密钥丢失后，后台保存的 Key 无法解密，需要重新填写。
+- **只写不读**：任何接口都不返回 Key，页面只显示前 3 位和末 4 位。
+- **二次确认**：设置、更换或清除 Key 时必须再输入一次管理员密码，并有调用频率限制。
+- **上游地址不可在后台修改**：只能通过服务器配置 `OFFICIAL_AI_BASE_URL` 修改，防止被盗用的管理员会话把 Key 发往别处。
+- **审计**：每次修改都在操作日志里记录操作者、时间和改动的字段名，不记录 Key。
+- **优先级**：服务器配置文件里如果写了 `OFFICIAL_AI_KEY`，以文件为准，后台显示“由服务器配置文件设置”且不能修改，作为应急手段。后台从未保存过设置时，开关、模型和额度也使用配置文件里的值。
 
 ## 9. 安全要点
 

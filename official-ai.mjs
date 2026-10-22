@@ -52,13 +52,16 @@ export function validateCompletion(body) {
   return { messages: body.messages, max_tokens: body.max_tokens ?? 8192, ...(Object.hasOwn(body, 'temperature') ? { temperature: body.temperature } : {}), ...(body.response_format ? { response_format: body.response_format } : {}) };
 }
 
-export function createOfficialAi({ db, settings, connect, json, readBody, now = () => Date.now(), fetchImpl = globalThis.fetch, timeoutMs = 90000, siteConcurrency = 8 }) {
+export function createOfficialAi({ db, settings: source, connect, json, readBody, now = () => Date.now(), fetchImpl = globalThis.fetch, timeoutMs = 90000, siteConcurrency = 8 }) {
   db.exec(`CREATE TABLE IF NOT EXISTS official_ai_usage (user_id TEXT NOT NULL REFERENCES users(id), day TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, day));
     CREATE TABLE IF NOT EXISTS official_ai_budget (period TEXT PRIMARY KEY, tokens INTEGER NOT NULL);`);
+  // Settings may change from the admin backend; read them on every request.
+  const read = typeof source === 'function' ? source : () => source;
   const active = new Map();
   const month = time => shanghaiDay(time).slice(0, 7);
   const usedTokens = time => db.prepare('SELECT tokens FROM official_ai_budget WHERE period=?').get(month(time))?.tokens || 0;
   const usage = userId => {
+    const settings = read();
     const time = now(), day = shanghaiDay(time), used = db.prepare('SELECT calls FROM official_ai_usage WHERE user_id=? AND day=?').get(userId, day)?.calls || 0;
     return { enabled: settings.enabled && !!settings.key && usedTokens(time) < settings.monthlyTokens, model: '通义千问 ' + settings.model, vision: true, dailyLimit: settings.dailyLimit, usedToday: used, resetAt: nextShanghaiMidnight(time) };
   };
@@ -67,6 +70,7 @@ export function createOfficialAi({ db, settings, connect, json, readBody, now = 
 
   async function handle(req, res, url) {
     if (url.pathname !== '/api/ai/v1/chat/completions') return false;
+    const settings = read();
     if (req.method !== 'POST') fail(405, 'AI_REQUEST_UNSUPPORTED', '只支持 POST');
     if (!settings.enabled) fail(404, 'OFFICIAL_AI_DISABLED', '官方 AI 暂未开放');
     const device = connect.device(req);

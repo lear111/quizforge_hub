@@ -39,6 +39,8 @@ export function createConnect({ db, enabled, identity, throttle, json, bodyJson,
   db.exec(`CREATE TABLE IF NOT EXISTS connect_devices (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), token TEXT UNIQUE NOT NULL, name TEXT NOT NULL, client TEXT NOT NULL, created TEXT NOT NULL, last_used INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
     CREATE INDEX IF NOT EXISTS connect_devices_user ON connect_devices(user_id, revoked);
     CREATE TABLE IF NOT EXISTS connect_codes (code TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), client TEXT NOT NULL, redirect_uri TEXT NOT NULL, challenge TEXT NOT NULL, device_name TEXT NOT NULL, expires INTEGER NOT NULL);`);
+  // These may be functions so admin changes apply without a restart.
+  const live = value => typeof value === 'function' ? value() : value;
   const pending = new Map();
   const sweep = () => {
     const time = now();
@@ -63,13 +65,13 @@ export function createConnect({ db, enabled, identity, throttle, json, bodyJson,
 
   function consentPage(request, entry, user) {
     const client = entry.client === 'web' ? '电脑上的 QuizForge' : 'Android 上的 QuizForge';
-    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>连接设备 · QuizForge</title><link rel="icon" type="image/png" href="/quizforge-icon.png"><link rel="stylesheet" href="/styles.css"><script type="module" src="/connect.js"></script></head><body><main id="app" class="connect-page"><section class="panel connect-panel" data-request="${esc(request)}"><h1>允许这台设备使用官方 AI 评分？</h1><dl class="connect-facts"><dt>设备</dt><dd>${esc(entry.deviceName)}（${client}）</dd><dt>账号</dt><dd>${esc(user.name)}</dd><dt>权限</dt><dd>使用官方 AI 评分，次数计入你的账号额度（每天 ${dailyLimit} 次）。设备不能访问你的题库、评论或账号设置。</dd></dl><p class="connect-note">评分时，题目、答案和图片会经由 QuizForge 服务器发送给模型服务商（${esc(modelLabel)}），服务器不保存这些内容。你可以随时在“我的分享”页撤销这台设备。</p><div class="connect-actions"><button class="button" data-decision="allow">允许</button><button class="text-button" data-decision="deny">拒绝</button></div><p class="form-error" role="alert"></p></section></main></body></html>`;
+    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>连接设备 · QuizForge</title><link rel="icon" type="image/png" href="/quizforge-icon.png"><link rel="stylesheet" href="/styles.css"><script type="module" src="/connect.js"></script></head><body><main id="app" class="connect-page"><section class="panel connect-panel" data-request="${esc(request)}"><h1>允许这台设备使用官方 AI 评分？</h1><dl class="connect-facts"><dt>设备</dt><dd>${esc(entry.deviceName)}（${client}）</dd><dt>账号</dt><dd>${esc(user.name)}</dd><dt>权限</dt><dd>使用官方 AI 评分，次数计入你的账号额度（每天 ${live(dailyLimit)} 次）。设备不能访问你的题库、评论或账号设置。</dd></dl><p class="connect-note">评分时，题目、答案和图片会经由 QuizForge 服务器发送给模型服务商（${esc(live(modelLabel))}），服务器不保存这些内容。你可以随时在“我的分享”页撤销这台设备。</p><div class="connect-actions"><button class="button" data-decision="allow">允许</button><button class="text-button" data-decision="deny">拒绝</button></div><p class="form-error" role="alert"></p></section></main></body></html>`;
   }
 
   async function handle(req, res, url) {
     const path = url.pathname;
     if (!(path === '/connect/authorize' || path.startsWith('/api/connect/'))) return false;
-    if (!enabled) fail(404, '官方 AI 暂未开放', 'OFFICIAL_AI_DISABLED');
+    if (!live(enabled)) fail(404, '官方 AI 暂未开放', 'OFFICIAL_AI_DISABLED');
     sweep();
     if (path === '/connect/authorize' && req.method === 'GET') {
       let key = url.searchParams.get('request'), entry = key && [...url.searchParams.keys()].length === 1 && /^[a-f0-9]{64}$/.test(key) ? pending.get(key) : null;
