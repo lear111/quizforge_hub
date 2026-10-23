@@ -149,7 +149,7 @@ const jsonOptions = (body, method = 'POST') => ({ method, headers: { 'Content-Ty
 function toast(message) { const node = $('#toast'); node.textContent = message; node.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => node.classList.remove('show'), 4500); }
 function account() {
   bindActivity({ document, account: user?.id || null });
-  $('#account').innerHTML = `${user ? `<div class="user-chip"><a href="#mine" class="avatar" title="我的分享">${esc(Array.from(user.name)[0])}</a><a href="#mine" class="name">${esc(user.name)}</a><button class="text-button" data-action="logout">退出</button></div>${user.admin ? `<a class="text-button" href="${adminEnabled ? '/admin/' : '#reviews'}">管理后台</a>` : ''}` : '<button class="text-button" data-action="login">登录 / 注册</button>'}<a href="#upload" class="button">${icon('plus')}<span>分享题库</span></a>`;
+  $('#account').innerHTML = `${user ? `<div class="user-chip"><a href="#mine" class="avatar" title="我的分享">${esc(Array.from(user.name)[0])}</a><a href="#mine" class="name">${esc(user.name)}</a><button class="text-button" data-action="logout">退出</button></div>${user.admin ? `<a class="text-button" href="${adminEnabled ? '/admin/' : '#reviews'}">管理后台</a>` : ''}` : '<button class="text-button" data-action="login">登录 / 注册</button>'}<a href="#upload" class="button light">${icon('plus')}<span>分享题库</span></a>`;
   if (cloudEnabled && !practiceOrigin) {
     document.title = 'QuizForge Hub · 题库广场'; const subtitle = document.querySelector('.brand small'); if (subtitle) subtitle.textContent = 'Hub';
     const link = document.createElement('a'); link.className = 'text-button'; link.href = '/cloud/'; link.textContent = '云端空间'; $('#account').prepend(link);
