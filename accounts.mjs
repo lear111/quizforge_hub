@@ -66,7 +66,7 @@ export function syncHubIdentity(db, user) {
   db.exec('BEGIN IMMEDIATE');
   try {
     db.prepare("INSERT INTO users(id,email,name,password,admin,created) VALUES (?,?,?,'!external-auth',?,?) ON CONFLICT(id) DO UPDATE SET email=excluded.email,name=excluded.name,admin=excluded.admin").run(user.id, user.email, user.name, user.admin, new Date().toISOString());
-    if (user.phone) db.prepare('INSERT INTO user_phones VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET phone=excluded.phone').run(user.id, user.phone, Date.now());
+    if (user.phone) db.prepare('INSERT INTO user_phones VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET phone=excluded.phone,verified=CASE WHEN user_phones.phone=excluded.phone AND user_phones.verified>0 THEN user_phones.verified ELSE excluded.verified END').run(user.id, user.phone, Date.now());
     else db.prepare('DELETE FROM user_phones WHERE user_id=?').run(user.id);
     db.prepare('DELETE FROM unverified_contacts WHERE user_id=?').run(user.id);
     for (const channel of user.unverifiedContacts || []) if (user[channel]) setContactVerified(db, user.id, { channel, value: user[channel] }, false);

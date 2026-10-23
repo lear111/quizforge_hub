@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from '../server.mjs';
 import { createPracticeAdminBridge, createAdminClient } from '../admin/bridge.mjs';
 import { loadRuntime } from '../cloud/runtime.mjs';
+import { setContactVerified } from '../accounts.mjs';
+import { HubLogin } from '../cloud/hub-login.mjs';
 
 const snapshot = (process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url)));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -133,6 +135,55 @@ test('one public-package review registers extension hashes, private imports reus
   const affected = await (await f.request('/api/admin/cloud/extensions/affected?digest=' + job.extensions[0].digest)).json();
   assert.deepEqual(affected.items.map(row => row.id), [item.id]); assert.equal(affected.publicPacks[0].id, id);
   const stopped = await fetch(f.practiceOrigin + '/api/cloud/practice/' + item.id + '/api/library/index', { headers: { Cookie: 'qfh_session=' + f.tokens.newcomer } }); assert.equal(stopped.status, 422);
+});
+
+test('private delivery accepts a phone-only recipient before their first practice visit and preserves contact verification and ownership', { skip: !existsSync(snapshot) }, async t => {
+  const f = await fixture(t), recipient = f.people.newcomer, phone = '+8613800138000';
+  const created = f.hub.db.prepare('SELECT created FROM users WHERE id=?').get(recipient.id).created;
+  f.hub.db.exec('BEGIN IMMEDIATE');
+  try {
+    f.hub.db.prepare('UPDATE users SET email=NULL WHERE id=?').run(recipient.id);
+    f.hub.db.prepare('INSERT INTO user_phones VALUES(?,?,?)').run(recipient.id, phone, 0);
+    setContactVerified(f.hub.db, recipient.id, { channel: 'phone', value: phone }, false);
+    f.hub.db.exec('COMMIT');
+  } catch (error) { f.hub.db.exec('ROLLBACK'); throw error; }
+  assert.equal(f.practice.db.prepare('SELECT 1 FROM users WHERE id=?').get(recipient.id), undefined);
+  const bytes = await fs.readFile(path.join(snapshot, 'basic-demo.qbank'));
+  const delivery = '/api/admin/cloud/users/' + recipient.id + '/import';
+  assert.equal((await f.upload(delivery, bytes, 'synthetic.qbank', 'user')).status, 403);
+  const response = await f.upload(delivery, bytes);
+  assert.equal(response.status, 200, await response.clone().text());
+  const { item } = await response.json(); assert.equal(item.source.kind, 'admin-delivery');
+  assert.equal(f.practice.db.prepare('SELECT user_id FROM cloud_imports WHERE id=?').get(item.id).user_id, recipient.id);
+  assert.ok(f.practice.cloudAccounts.status(recipient.id).usage.storageBytes > 0);
+  assert.equal(f.practice.cloudAccounts.status(f.people.admin.id).usage.storageBytes, 0);
+  assert.equal(f.hub.db.prepare('SELECT COUNT(*) AS n FROM packs').get().n, 0, 'private delivery must not publish a bank');
+  assert.equal(f.practice.db.prepare('SELECT email FROM users WHERE id=?').get(recipient.id).email, null);
+  assert.deepEqual({ ...f.practice.db.prepare('SELECT phone,verified FROM user_phones WHERE user_id=?').get(recipient.id) }, { phone, verified: 0 });
+  assert.equal(f.practice.db.prepare('SELECT contact FROM unverified_contacts WHERE user_id=? AND channel=?').get(recipient.id, 'phone').contact, phone);
+  const login = new HubLogin({ practiceOrigin: 'https://practice.example', hubOrigin: 'https://hub.example', authPort: f.hubPort });
+  assert.deepEqual((await login.identity(f.tokens.newcomer)).unverifiedContacts, ['phone'], 'normal sign-in must retain the same verification state as private delivery');
+  const profileRoute = '/api/admin/users/' + recipient.id + '/profile';
+  const { user } = await (await f.request(profileRoute)).json();
+  assert.equal(user.email, null); assert.equal(user.phone, phone); assert.equal(user.created, created); assert.deepEqual(user.unverifiedContacts, ['phone']);
+  assert.equal(Object.hasOwn(user, 'password'), false);
+  assert.equal((await f.request(profileRoute, null, '')).status, 401);
+  assert.equal((await f.request(profileRoute, null, 'user')).status, 403);
+  assert.equal((await f.request('/api/admin/users/' + randomUUID() + '/profile')).status, 404);
+  // A later verification and quota change must preserve the already delivered bank.
+  f.hub.db.exec('BEGIN IMMEDIATE');
+  try { setContactVerified(f.hub.db, recipient.id, { channel: 'phone', value: phone }, true); f.hub.db.exec('COMMIT'); }
+  catch (error) { f.hub.db.exec('ROLLBACK'); throw error; }
+  const limit = await f.request('/api/admin/cloud/users/' + recipient.id + '/limits', { storageBytes: 32 * 1024 ** 2, dailyTrafficBytes: 1024, reason: '合成手机号接收人额度回归' }, 'admin', 'PUT');
+  assert.equal(limit.status, 200, await limit.clone().text());
+  assert.ok(f.practice.db.prepare('SELECT verified FROM user_phones WHERE user_id=?').get(recipient.id).verified > 0);
+  assert.equal(f.practice.db.prepare('SELECT COUNT(*) AS n FROM unverified_contacts WHERE user_id=?').get(recipient.id).n, 0);
+  assert.equal(f.practice.db.prepare('SELECT user_id FROM cloud_imports WHERE id=?').get(item.id).user_id, recipient.id);
+  assert.equal(f.practice.cloudAccounts.status(recipient.id).limits.dailyTrafficBytes, 1024);
+  const beforeBlocked = f.practice.db.prepare('SELECT COUNT(*) AS n FROM cloud_imports').get().n;
+  assert.equal((await f.request('/api/admin/users/' + recipient.id + '/block', { blocked: true, reason: '合成封禁边界回归' }, 'admin', 'PUT')).status, 200);
+  assert.equal((await f.upload(delivery, bytes)).status, 404);
+  assert.equal(f.practice.db.prepare('SELECT COUNT(*) AS n FROM cloud_imports').get().n, beforeBlocked);
 });
 
 test('real user activity deduplicates accounts and keeps heartbeat out of DAU; public/private content never appears in metric records', { skip: !existsSync(snapshot) }, async t => {

@@ -31,7 +31,7 @@ export class HubLogin {
     const { user } = await result.json();
     if (!user) return null;
     if (!validHubIdentity(user)) throw new CloudError(503, 'Hub 登录响应无效');
-    return { id: user.id, name: user.name, email: user.email, ...(user.phone ? { phone: user.phone } : {}), admin: user.admin };
+    return { id: user.id, name: user.name, email: user.email, ...(user.phone ? { phone: user.phone } : {}), admin: user.admin, ...(user.unverifiedContacts ? { unverifiedContacts: user.unverifiedContacts } : {}) };
   }
   async resolve(req) {
     this.sweep();

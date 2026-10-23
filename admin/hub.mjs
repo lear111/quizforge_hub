@@ -3,6 +3,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { CloudError } from '../cloud/accounts.mjs';
 import { bytes, filename, jsonBody, reason, send, uuid } from './common.mjs';
+import { accountProfile } from '../accounts.mjs';
 
 export function createHubAdmin({ db, invitations, invitationPolicy, authPolicy, authCapabilities, adminContact, metrics, requireUser, requireAdmin, throttle, cloud, token, uploadDir, enabled, officialAi, aiPoints, verifyPassword, shanghaiDay }) {
   db.exec(`CREATE TABLE IF NOT EXISTS pack_admin_reviews(pack_id TEXT NOT NULL,revision INTEGER NOT NULL,sha256 TEXT NOT NULL,submission TEXT NOT NULL,PRIMARY KEY(pack_id,revision,sha256));
@@ -35,8 +36,9 @@ export function createHubAdmin({ db, invitations, invitationPolicy, authPolicy, 
     const route = url.pathname.slice('/api/admin'.length); let value, status = 200;
     const profile = /^\/users\/([a-f0-9-]{36})\/profile$/.exec(route);
     if (profile && req.method === 'GET') {
-      const user = db.prepare('SELECT id,name,email,admin,created FROM users WHERE id=?').get(profile[1]);
-      if (!user || db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(profile[1])) throw new CloudError(404, '用户不存在或已被封禁'); value = { user };
+      const row = db.prepare('SELECT created FROM users WHERE id=?').get(profile[1]);
+      if (!row || db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(profile[1])) throw new CloudError(404, '用户不存在或已被封禁');
+      value = { user: { ...accountProfile(db, profile[1]), created: row.created } };
     } else if (route === '/overview' && req.method === 'GET') {
       const local = metrics.overview(Number(url.searchParams.get('days'))), remote = await call(req, '/summary');
       value = { ...local, transfers: { requests: local.transfers.requests + remote.transfers.requests, bytes: local.transfers.bytes + remote.transfers.bytes }, cloud: remote };
