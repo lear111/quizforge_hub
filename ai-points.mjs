@@ -40,6 +40,22 @@ export function createAiPoints({ db, master = null, now = () => Date.now() }) {
   const balance = userId => db.prepare('SELECT balance FROM ai_points WHERE user_id=?').get(userId)?.balance || 0;
   const add = (userId, delta, time) => db.prepare('INSERT INTO ai_points VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET balance=MAX(balance+excluded.balance,0),updated=excluded.updated').run(userId, delta, time);
   const state = row => row.redeemed !== null ? 'redeemed' : row.revoked !== null ? 'disabled' : row.expires <= now() ? 'expired' : 'available';
+  // A temporary sign-up bonus (0 = off), set with `scripts/admin.mjs signup-bonus <yuan>`.
+  db.exec('CREATE TABLE IF NOT EXISTS ai_signup_bonus (id INTEGER PRIMARY KEY CHECK(id=1), amount INTEGER NOT NULL CHECK(amount>=0)); INSERT OR IGNORE INTO ai_signup_bonus VALUES (1,0);');
+  const signupBonus = () => db.prepare('SELECT amount FROM ai_signup_bonus WHERE id=1').get().amount;
+  function setSignupBonus(amount) {
+    if (!Number.isSafeInteger(amount) || amount < 0 || amount > 100 * UNIT) fail(400, 'AI_BONUS_INVALID', '赠送额度应在 0–100 元之间');
+    db.prepare('UPDATE ai_signup_bonus SET amount=? WHERE id=1').run(amount);
+  }
+  // Runs inside the registration transaction, so a failed sign-up grants nothing.
+  function grantSignup(userId) {
+    const amount = signupBonus();
+    if (!amount) return 0;
+    const time = now();
+    add(userId, amount, time);
+    db.prepare('INSERT INTO ai_points_ledger VALUES (?,?,?,?,?,?)').run(randomUUID(), userId, amount, 'signup', '新用户赠送', time);
+    return amount;
+  }
 
   // Spends up to `amount` after a successful grading. Concurrent gradings may
   // both start with a small balance; the balance then stops at 0, never below.
@@ -161,5 +177,5 @@ export function createAiPoints({ db, master = null, now = () => Date.now() }) {
     return [...entries, ...spend].sort((a, b) => b.at - a.at).slice(0, limit);
   }
 
-  return { balance, charge, redeem, createCodes, listCodes, updateCode, summary, accounts, setBalance, history };
+  return { balance, charge, redeem, createCodes, listCodes, updateCode, summary, accounts, setBalance, history, signupBonus, setSignupBonus, grantSignup };
 }

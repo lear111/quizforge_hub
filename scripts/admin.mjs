@@ -5,11 +5,21 @@ import { loginContact, accountByContact } from '../accounts.mjs';
 import { createInvitations, createInvitationPolicy } from '../invitations.mjs';
 import { createAuthPolicy } from '../auth-policy.mjs';
 import { randomUUID } from 'node:crypto';
+import { createAiPoints, UNIT } from '../ai-points.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const db = new DatabaseSync(path.join(path.resolve(process.env.DATA_DIR || path.join(root, 'data')), 'hub.sqlite'));
 db.exec('PRAGMA busy_timeout=5000');
 const [action, identifier] = process.argv.slice(2);
+// Temporary free AI bonus for each new account: `signup-bonus` shows it, `signup-bonus 1` sets ¥1, `signup-bonus 0` stops it.
+if (action === 'signup-bonus') {
+  const points = createAiPoints({ db });
+  try {
+    if (identifier !== undefined) points.setSignupBonus(Math.round(Number(identifier) * UNIT));
+    console.log(`新注册用户赠送免费 AI 额度：¥${(points.signupBonus() / UNIT).toFixed(2)}`);
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
+  db.close(); process.exit();
+}
 const contact = identifier && loginContact({ identifier });
 const account = contact && accountByContact(db, contact);
 if (action === 'promote' && identifier) {

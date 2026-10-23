@@ -227,3 +227,19 @@ test('server-side recovery disables only the optional login factors and requires
   for (const field of ['registrationCodeRequired', 'registrationCaptchaRequired', 'invitationRequired']) assert.equal(after[field], before[field]);
   assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM admin_audit WHERE action='authentication-login-recovery'").get().n, 1);
 });
+
+test('a temporary sign-up bonus gives each new account free AI balance once, with a ledger entry, and stops at 0', async t => {
+  const f = await fixture(t); await f.setting({ invitationRequired: false, registrationCodeRequired: false, registrationCaptchaRequired: false });
+  const balance = id => f.db.prepare('SELECT balance FROM ai_points WHERE user_id=?').get(id)?.balance ?? 0;
+  f.db.prepare('UPDATE ai_signup_bonus SET amount=10000 WHERE id=1').run();
+  const first = await f.request('/api/auth/register', { phone: '+8613600136001', password, name: '赠送' }); assert.equal(first.status, 201);
+  const id = (await first.json()).user.id;
+  assert.equal(balance(id), 10000);
+  assert.deepEqual(f.db.prepare('SELECT delta,kind FROM ai_points_ledger WHERE user_id=?').all(id).map(row => ({ ...row })), [{ delta: 10000, kind: 'signup' }]);
+  assert.equal((await f.request('/api/auth/register', { phone: '+8613600136001', password, name: '重复' })).status, 409);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM ai_points_ledger').get().n, 1);
+  f.db.prepare('UPDATE ai_signup_bonus SET amount=0 WHERE id=1').run();
+  const second = await f.request('/api/auth/register', { phone: '+8613600136002', password, name: '不赠送' });
+  assert.equal(balance((await second.json()).user.id), 0);
+  assert.equal(balance(f.actors.admin.id), 0);
+});

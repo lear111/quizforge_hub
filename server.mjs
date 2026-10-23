@@ -511,6 +511,7 @@ export async function createApp(options = {}) {
             // Re-read inside the final account transaction: an administrator
             // can enable the gate while password hashing is still in flight.
             if (invitationPolicy.required()) invitations.consume(input.invitationCode, id);
+            aiPoints.grantSignup(id);
           };
           try {
             if (policy.registrationCodeRequired) {

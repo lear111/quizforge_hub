@@ -200,7 +200,7 @@ export function createAiPages({ root, main, api, toast }) {
     // Redeems and admin changes are listed one by one; grading spend is recorded per day, so it is a separate daily total.
     const amount = delta => `${delta >= 0 ? '+' : '−'}${exact(Math.abs(delta))}`;
     const changes = history.filter(entry => entry.kind !== 'grading'), days = history.filter(entry => entry.kind === 'grading');
-    const change = entry => `<li><span>${esc(shortTime(entry.at))} ${esc(entry.kind === 'redeem' ? '兑换码 ' + entry.note : '管理员调整：' + entry.note)}</span><span>${amount(entry.delta)}</span></li>`;
+    const change = entry => `<li><span>${esc(shortTime(entry.at))} ${esc(entry.kind === 'redeem' ? '兑换码 ' + entry.note : entry.kind === 'signup' ? '新用户赠送' : '管理员调整：' + entry.note)}</span><span>${amount(entry.delta)}</span></li>`;
     const dayTotal = entry => `<li><span>${esc(entry.day)} 当天合计 · 评分 ${entry.calls} 次</span><span>${amount(entry.delta)}</span></li>`;
     open(`调整 ${user.name} 的 AI 余额`, `<p class="qa-muted">当前余额 ${exact(balance)}</p><div class="qa-fields">
       ${field('新余额（元）', `<input name="balance" type="number" required min="0" max="1000000" step="0.0001" value="${plain(balance)}">`, true)}
