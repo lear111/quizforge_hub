@@ -7,7 +7,8 @@ import { createPracticeAdminBridge } from '../admin/bridge.mjs';
 import { createAdminContactSource } from '../cloud/admin-contact.mjs';
 
 if (!process.env.DATA_DIR || path.basename(path.resolve(process.env.DATA_DIR)) !== 'quizforge-hub-practice') throw new Error('Dedicated practice data directory required');
-const practiceOrigin = 'https://practice.treenewbee.cloud', hubOrigin = 'https://quizforge.treenewbee.cloud';
+// The test server sets these to its own -test domains; production uses the defaults.
+const practiceOrigin = process.env.PRACTICE_ORIGIN || 'https://practice.treenewbee.cloud', hubOrigin = process.env.HUB_ORIGIN || 'https://quizforge.treenewbee.cloud';
 const login = new HubLogin({ practiceOrigin, hubOrigin });
 const reportActivity = async (req, kind) => {
   const token = login.token(req); if (!token) return;
