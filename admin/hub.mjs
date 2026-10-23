@@ -16,11 +16,11 @@ export function createHubAdmin({ db, invitations, invitationPolicy, metrics, req
   const call = (req, route, options = {}) => cloud(route, { ...options, token: token(req) });
   const listUsers = async (req, url) => {
     const page = Math.max(1, Math.min(100000, Number(url.searchParams.get('page')) || 1)), query = (url.searchParams.get('q') || '').slice(0, 100), pattern = '%' + query.replace(/[!%_]/g, '!$&') + '%';
-    const where = "WHERE name LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!'";
-    const rows = db.prepare(`SELECT id,name,email,admin,created FROM users ${where} ORDER BY created DESC,id LIMIT 50 OFFSET ?`).all(pattern, pattern, (page - 1) * 50);
+    const where = "WHERE name LIKE ? ESCAPE '!' OR email LIKE ? ESCAPE '!' OR id IN (SELECT user_id FROM user_phones WHERE phone LIKE ? ESCAPE '!')";
+    const rows = db.prepare(`SELECT id,name,email,(SELECT phone FROM user_phones WHERE user_id=users.id) AS phone,admin,created FROM users ${where} ORDER BY created DESC,id LIMIT 50 OFFSET ?`).all(pattern, pattern, pattern, (page - 1) * 50);
     const quotas = rows.length ? await call(req, '/accounts?ids=' + rows.map(u => u.id).join(',')) : { accounts: {}, defaults: {} };
     const ai = aiPoints ? aiPoints.accounts(rows.map(u => u.id)) : {};
-    return { page, count: db.prepare(`SELECT COUNT(*) AS n FROM users ${where}`).get(pattern, pattern).n, defaults: quotas.defaults,
+    return { page, count: db.prepare(`SELECT COUNT(*) AS n FROM users ${where}`).get(pattern, pattern, pattern).n, defaults: quotas.defaults,
       users: rows.map(u => ({ ...u, disabled: !!db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(u.id), lastSeen: db.prepare('SELECT last_seen FROM activity_online WHERE user_id=?').get(u.id)?.last_seen || null, invitation: db.prepare('SELECT prefix FROM invitations WHERE user_id=?').get(u.id)?.prefix || null, ai: ai[u.id] || { balance: 0, redeemed: 0 }, resources: quotas.accounts[u.id] || { limits: quotas.defaults, overrides: { storageBytes: null, dailyTrafficBytes: null }, usage: { storageBytes: 0, dailyTrafficBytes: 0 } } })) };
   };
   return async (req, res, url) => {

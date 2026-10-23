@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { initializeContacts } from '../accounts.mjs';
 
 export class CloudError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -18,6 +19,7 @@ function limits(value, nullable = false) {
 // download transaction so site, IP and account traffic are reserved together.
 export class CloudAccounts {
   constructor(db, { now = Date.now, timeZone = 'Asia/Shanghai', defaults, siteStorageBytes = 5 * 1024 ** 3 } = {}) {
+    initializeContacts(db);
     this.db = db; this.now = now;
     this.calendar = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
     if (!numeric(siteStorageBytes)) throw new Error('Invalid cloud site storage budget');
@@ -80,9 +82,9 @@ export class CloudAccounts {
     this.admin(actorId);
     if (!Number.isSafeInteger(page) || page < 1 || page > 100000 || typeof query !== 'string' || query.length > 100) fail(400, '无效的查询');
     const pattern = '%' + query.replace(/[!%_]/g, '!$&') + '%';
-    const where = "WHERE email LIKE ? ESCAPE '!' OR name LIKE ? ESCAPE '!'";
-    const count = this.db.prepare('SELECT COUNT(*) AS n FROM users ' + where).get(pattern, pattern).n;
-    const users = this.db.prepare('SELECT id,name,email,admin FROM users ' + where + ' ORDER BY created DESC,id LIMIT 50 OFFSET ?').all(pattern, pattern, (page - 1) * 50);
+    const where = "WHERE email LIKE ? ESCAPE '!' OR name LIKE ? ESCAPE '!' OR id IN (SELECT user_id FROM user_phones WHERE phone LIKE ? ESCAPE '!')";
+    const count = this.db.prepare('SELECT COUNT(*) AS n FROM users ' + where).get(pattern, pattern, pattern).n;
+    const users = this.db.prepare('SELECT id,name,email,(SELECT phone FROM user_phones WHERE user_id=users.id) AS phone,admin FROM users ' + where + ' ORDER BY created DESC,id LIMIT 50 OFFSET ?').all(pattern, pattern, pattern, (page - 1) * 50);
     return { users: users.map(user => ({ ...user, ...this.status(user.id) })), count, page, defaults: this.defaults(), site: this.siteStatus() };
   }
   audits(actorId, userId = null) {

@@ -23,11 +23,15 @@ const connectLogin = target => /^#connect-login\//.test(target || '');
 let filters = { q: '', sort: 'latest', page: 1 };
 let reviewFilter = 'pending';
 let currentPack = null, upload = null, previewUrls = [];
-let registrationReady = false, captchaSiteKey = '', captchaWidget = null, captchaToken = '', captchaLoader, codeTimer;
+let registrationReady = false, registrationMethods = { email: false, phone: false }, captchaSiteKey = '', captchaWidget = null, captchaToken = '', captchaLoader, codeTimer, captchaEpoch = 0, captchaAction = '';
 const codeCooldowns = new Map();
+const contactChannel = value => /^[+\d]/.test(value.trim()) && !value.includes('@') ? 'phone' : 'email';
+const contactReady = () => !!registrationMethods[contactChannel($('#auth-email')?.value || '')];
+const isBinding = () => $('#auth-form')?.dataset.mode === 'bind';
 function clearCaptcha() {
+  captchaEpoch++;
   if (captchaWidget !== null && window.turnstile) window.turnstile.remove(captchaWidget);
-  captchaWidget = null; captchaToken = ''; clearInterval(codeTimer);
+  captchaWidget = null; captchaToken = ''; captchaAction = ''; clearInterval(codeTimer);
 }
 function loadCaptcha() {
   if (window.turnstile) return Promise.resolve();
@@ -44,14 +48,16 @@ function updateCodeButton() {
   const email = $('#auth-email').value.trim().toLowerCase();
   const remaining = Math.max(0, Math.ceil(((codeCooldowns.get(email) || 0) - Date.now()) / 1000));
   button.textContent = remaining ? `${remaining} 秒后重发` : '获取验证码';
-  button.disabled = !registrationReady || !captchaToken || (invitationRequired && !$('#auth-invitation')?.value.trim()) || remaining > 0 || button.dataset.sending === '1';
+  button.disabled = !contactReady() || !captchaToken || (!isBinding() && invitationRequired && !$('#auth-invitation')?.value.trim()) || remaining > 0 || button.dataset.sending === '1';
 }
 async function mountCaptcha() {
   const container = $('#register-captcha'); if (!container || !registrationReady) return;
+  const epoch = ++captchaEpoch;
   try {
     await loadCaptcha();
-    if (!container.isConnected || !$('#auth-dialog').open) return;
-    captchaWidget = window.turnstile.render(container, { sitekey: captchaSiteKey, action: 'register_email', size: container.clientWidth < 300 ? 'compact' : 'flexible',
+    if (epoch !== captchaEpoch || !container.isConnected || !$('#auth-dialog').open) return;
+    captchaAction = isBinding() ? 'bind_contact' : 'register_' + contactChannel($('#auth-email').value);
+    captchaWidget = window.turnstile.render(container, { sitekey: captchaSiteKey, action: captchaAction, size: container.clientWidth < 300 ? 'compact' : 'flexible',
       callback: token => { captchaToken = token; updateCodeButton(); },
       'expired-callback': () => { captchaToken = ''; updateCodeButton(); },
       'error-callback': () => { captchaToken = ''; updateCodeButton(); $('#auth-form .form-error').textContent = '人机验证未完成，请重试'; },
@@ -61,12 +67,15 @@ async function mountCaptcha() {
 }
 async function sendEmailCode() {
   const input = $('#auth-email'), button = $('#send-email-code'), form = $('#auth-form');
-  if (!input.reportValidity() || !captchaToken || button.disabled) return;
+  if (!input.reportValidity() || (isBinding() && !$('#auth-password').reportValidity()) || !captchaToken || button.disabled) return;
   const email = input.value.trim().toLowerCase();
   const widget = captchaWidget;
   button.dataset.sending = '1'; updateCodeButton(); form.querySelector('.form-error').textContent = '';
   try {
-    const result = await api('/api/auth/email-code', jsonOptions({ email, captchaToken, invitationCode: $('#auth-invitation')?.value.trim() }));
+    const phone = contactChannel(email) === 'phone';
+    const result = await api(isBinding() ? '/api/account/contact-code' : '/api/auth/' + (phone ? 'phone-code' : 'email-code'), jsonOptions(isBinding()
+      ? { identifier: email, password: $('#auth-password').value, captchaToken }
+      : { [phone ? 'phone' : 'email']: email, captchaToken, invitationCode: $('#auth-invitation')?.value.trim() }));
     codeCooldowns.set(email, Date.now() + result.retryAfter * 1000); toast(result.message);
   } catch (error) { if (form.isConnected) form.querySelector('.form-error').textContent = error.message; await refreshInvitationPolicy(form).catch(() => {}); }
   finally {
@@ -74,6 +83,17 @@ async function sendEmailCode() {
     if (widget === captchaWidget) { captchaToken = ''; if (widget !== null) window.turnstile.reset(widget); }
     updateCodeButton();
   }
+}
+function updateContactFields() {
+  const form = $('#auth-form'); if (!form || form.dataset.mode === 'login') return;
+  const phone = contactChannel($('#auth-email').value) === 'phone';
+  document.querySelector('label[for="auth-code"]').textContent = phone ? '短信验证码' : '邮箱验证码';
+  const status = $('#auth-method-status');
+  status.textContent = contactReady() ? (isBinding() ? '验证后绑定到当前账号，原有题库和 AI 余额不变。' : '邮箱和手机号验证其中一个即可。') : (phone ? '手机验证暂未开放，请使用邮箱。' : '邮箱验证暂未开放，请稍后再试。');
+  form.querySelector('button[type="submit"]').disabled = !contactReady();
+  const action = isBinding() ? 'bind_contact' : 'register_' + (phone ? 'phone' : 'email');
+  if (captchaAction && captchaAction !== action) { clearCaptcha(); mountCaptcha(); }
+  updateCodeButton();
 }
 
 async function api(url, options = {}) {
@@ -157,36 +177,51 @@ async function reports(stamp) {
 }
 async function refreshInvitationPolicy(form) {
   const config = await api('/api/config', { signal: AbortSignal.timeout(5000) });
-  if (form !== $('#auth-form') || form.dataset.mode !== 'register' || !$('#auth-dialog').open) return;
+  if (form !== $('#auth-form') || form.dataset.mode === 'login' || !$('#auth-dialog').open) return;
+  registrationReady = config.registrationReady;
+  registrationMethods = config.registrationMethods || { email: registrationReady, phone: false };
+  captchaSiteKey = config.turnstileSiteKey;
   invitationRequired = config.invitationRequired === true;
   let input = $('#auth-invitation');
-  if (invitationRequired && !input) {
+  if (form.dataset.mode === 'register' && invitationRequired && !input) {
     $('#auth-code').closest('.field').insertAdjacentHTML('beforebegin', '<div class="field"><label for="auth-invitation">邀请码</label><input id="auth-invitation" name="invitationCode" required maxlength="38" autocomplete="off" spellcheck="false" placeholder="请输入管理员提供的邀请码"><p class="field-help">当前采用邀请注册，每个邀请码仅供一个账号使用。</p></div>');
     input = $('#auth-invitation'); input.addEventListener('input', updateCodeButton);
   }
   if (input) { input.required = invitationRequired; input.disabled = !invitationRequired; input.closest('.field').hidden = !invitationRequired; }
-  updateCodeButton();
+  if (registrationReady && captchaWidget === null) mountCaptcha();
+  updateContactFields();
 }
 function showAuth(mode = 'login', target = null) {
   clearCaptcha();
   authTarget = target;
-  $('#auth-content').innerHTML = `<h2 id="auth-title">${mode === 'register' ? '欢迎加入题库广场' : '欢迎回来'}</h2><p class="dialog-intro">登录后，分享你的题库，与同路人交流。</p><div class="auth-tabs"><button class="${mode === 'login' ? 'active' : ''}" data-auth-mode="login">登录</button><button class="${mode === 'register' ? 'active' : ''}" data-auth-mode="register">注册账号</button></div><form id="auth-form" data-mode="${mode}">${mode === 'register' ? '<div class="field"><label for="auth-name">昵称</label><input id="auth-name" name="name" required maxlength="30" autocomplete="nickname" placeholder="大家会看到这个名字"></div>' : ''}<div class="field"><label for="auth-email">邮箱</label><input id="auth-email" name="email" type="email" required maxlength="180" autocomplete="email" placeholder="you@example.com"></div><div class="field"><label for="auth-password">密码</label><input id="auth-password" name="password" type="password" required minlength="10" maxlength="128" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}" placeholder="至少 10 个字符"></div><p class="form-error" role="alert"></p><button type="submit" class="button">${mode === 'register' ? '注册并登录' : '登录'}</button><p class="auth-note">邮箱仅用于账号登录，不会展示在题库和评论中。当前版本暂不支持邮箱验证和自助密码找回。</p></form>`;
+  const binding = mode === 'bind', registering = mode === 'register', needsCode = registering || binding;
+  const label = binding ? (user.email ? '待绑定手机号' : '待绑定邮箱') : (mode === 'login' || registrationMethods.phone ? '邮箱或手机号' : '邮箱');
+  const title = binding ? '补充账号联系方式' : registering ? '欢迎加入题库广场' : '欢迎回来';
+  $('#auth-content').innerHTML = '<h2 id="auth-title">'+title+'</h2><p class="dialog-intro">'+(binding ? '为当前账号增加另一种登录方式。' : '登录后，分享你的题库，与同路人交流。')+'</p>'
+    +(binding ? '' : '<div class="auth-tabs"><button class="'+(mode==='login'?'active':'')+'" data-auth-mode="login">登录</button><button class="'+(registering?'active':'')+'" data-auth-mode="register">注册账号</button></div>')
+    +'<form id="auth-form" data-mode="'+mode+'">'+(registering ? '<div class="field"><label for="auth-name">昵称</label><input id="auth-name" name="name" required maxlength="30" autocomplete="nickname" placeholder="大家会看到这个名字"></div>' : '')
+    +'<div class="field"><label for="auth-email">'+label+'</label><input id="auth-email" name="identifier" type="text" required maxlength="180" autocomplete="'+(registering?'email':'username')+'" autocapitalize="none" spellcheck="false" placeholder="'+(binding?(user.email?'中国大陆手机号':'you@example.com'):'邮箱或中国大陆手机号')+'"></div>'
+    +'<div class="field"><label for="auth-password">'+(binding?'当前账号密码':'密码')+'</label><input id="auth-password" name="password" type="password" required minlength="10" maxlength="128" autocomplete="'+(registering?'new-password':'current-password')+'" placeholder="至少 10 个字符"></div>'
+    +'<p class="form-error" role="alert"></p><button type="submit" class="button">'+(binding?'验证并绑定':registering?'注册并登录':'登录')+'</button><p class="auth-note">联系方式仅用于账号登录和验证，不会展示在题库和评论中。暂不支持自助密码找回。</p></form>';
   if (!$('#auth-dialog').open) $('#auth-dialog').showModal();
   if (practiceAuthorization(target)) $('#auth-content .dialog-intro').textContent = connectLogin(target) ? '登录或注册后，返回确认授权这台设备登录。' : '与题库广场共用同一个账号，登录或注册后自动返回云端练习。';
-  if (mode === 'register') {
+  if (needsCode) {
     const passwordField = $('#auth-password').closest('.field');
-    if (invitationRequired) {
+    if (registering && invitationRequired) {
       passwordField.insertAdjacentHTML('beforebegin', '<div class="field"><label for="auth-invitation">邀请码</label><input id="auth-invitation" name="invitationCode" required maxlength="38" autocomplete="off" spellcheck="false" placeholder="请输入管理员提供的邀请码"><p class="field-help">当前采用邀请注册，每个邀请码仅供一个账号使用。</p></div>');
       $('#auth-invitation').addEventListener('input', updateCodeButton);
     }
-    passwordField.insertAdjacentHTML('beforebegin', `<div class="field"><label for="auth-code">邮箱验证码</label><div class="email-code-row"><input id="auth-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required placeholder="6 位验证码"><button type="button" id="send-email-code" data-action="send-email-code" class="button secondary small" disabled>获取验证码</button></div></div>${registrationReady ? '<div id="register-captcha" class="register-captcha" aria-label="人机验证"></div>' : '<p class="auth-note" role="status">注册暂未开放，请稍后再来。已有账号仍可登录。</p>'}`);
-    $('#auth-form button[type="submit"]').disabled = !registrationReady;
-    $('#auth-email').addEventListener('input', updateCodeButton);
-    mountCaptcha();
-    const form = $('#auth-form');
-    refreshInvitationPolicy(form).catch(() => {});
+    passwordField.insertAdjacentHTML('afterend', '<div class="field"><label for="auth-code">验证码</label><div class="email-code-row"><input id="auth-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required placeholder="6 位验证码"><button type="button" id="send-email-code" data-action="send-email-code" class="button secondary small" disabled>获取验证码</button></div></div><p id="auth-method-status" class="auth-note" role="status"></p><div id="register-captcha" class="register-captcha" aria-label="人机验证"></div>');
+    $('#auth-email').addEventListener('input', updateContactFields);
+    mountCaptcha(); updateContactFields();
+    refreshInvitationPolicy($('#auth-form')).catch(() => {});
   }
-  $('#auth-form .auth-note:last-child').textContent = '邮箱仅用于登录和注册验证，不会展示在题库和评论中。暂不支持自助密码找回。';
+}
+function contactPanel() {
+  if (!user) return;
+  const section = document.createElement('section'); section.className = 'panel account-contacts';
+  section.innerHTML = '<h2>账号联系方式</h2><p>邮箱：'+esc(user.email || '未绑定')+'</p><p>手机：'+esc(user.phone || '未绑定')+'</p>'+(!user.email || !user.phone ? '<button type="button" class="button secondary small" data-action="bind-contact">'+(user.email?'绑定手机号':'绑定邮箱')+'</button>' : '<p class="subtle">邮箱和手机号均可登录同一个账号。</p>');
+  app.prepend(section);
 }
 function message(title, html) { $('#message-content').innerHTML = `<h2 id="message-title">${title}</h2>${html}`; $('#message-dialog').showModal(); }
 function guidelines() { message('分享须知', '<div class="guidelines"><p><strong>分享有权公开的内容。</strong><br>请注明资料来源，不上传未经授权的付费题库、教材扫描件或个人敏感信息。</p><p><strong>提交后等待审核。</strong><br>题库通过人工审核后才能公开下载；修改介绍、截图或文件后需重新审核。人工审核不等同于病毒扫描。</p><p><strong>让文件可用，让介绍清楚。</strong><br>请检查压缩包与截图，说明适用版本和导入方式。管理员会对格式 3 的 .qbank 静态解包核对内容与拓展，待审拓展不会自动运行。</p><p><strong>保持友善交流。</strong><br>评论用于提问和反馈，请勿发布广告、攻击性内容或个人信息。</p><p><strong>发现问题及时举报。</strong><br>题库详情页可提交举报。管理员可以下架题库、删除不当评论。</p><p>此页面是试用版分享说明，正式公开运营前需补充完整的服务协议、隐私政策和联系渠道。</p></div>'); }
@@ -213,7 +248,7 @@ async function render() {
     else if (view === 'upload') uploadForm(null);
     else if (view === 'reviews') await reviews(stamp);
     else if (view === 'reports') await reports(stamp);
-    else { await library(view === 'mine', stamp); if (view === 'mine' && officialAiEnabled && stamp === turn) await devices(stamp); }
+    else { await library(view === 'mine', stamp); if (view === 'mine' && stamp === turn) { contactPanel(); if (officialAiEnabled) await devices(stamp); } }
   } catch (error) { if (stamp === turn) app.innerHTML = empty('暂时无法打开', esc(error.message), '<button class="button small" data-action="retry">重试</button><a href="#library" class="text-button">返回广场</a>'); }
 }
 
@@ -236,6 +271,7 @@ document.addEventListener('click', async event => {
     if (!action) return; event.preventDefault();
     if (action === 'close-dialog') { element.closest('dialog').close(); return; }
     if (action === 'login') { showAuth('login', location.hash); return; }
+    if (action === 'bind-contact') { showAuth('bind', location.hash); return; }
     if (action === 'send-email-code') { await sendEmailCode(); return; }
     if (action === 'logout') { await api('/api/auth/logout', { method: 'POST' }); if (typeof BroadcastChannel !== 'undefined') { const channel = new BroadcastChannel('qfh-account'); channel.postMessage('logout'); channel.close(); } user = null; account(); toast('已退出登录'); if (location.hash === '#library') await render(); else location.hash = '#library'; return; }
     if (action === 'guidelines') { guidelines(); return; }
@@ -291,8 +327,8 @@ document.addEventListener('submit', async event => {
   if (!button) return; button.disabled = true; if (errorNode) errorNode.textContent = '';
   try {
     if (form.id === 'auth-form') {
-      const data = Object.fromEntries(new FormData(form)); const result = await api('/api/auth/' + form.dataset.mode, jsonOptions(data));
-      user = result.user; account(); $('#auth-dialog').close(); toast('登录成功');
+      const data = Object.fromEntries(new FormData(form)); const binding = form.dataset.mode === 'bind'; const result = await api(binding ? '/api/account/contact' : '/api/auth/' + form.dataset.mode, jsonOptions(data));
+      user = result.user; account(); $('#auth-dialog').close(); toast(form.dataset.mode === 'bind' ? '绑定成功，原账号数据和额度已保留' : '登录成功');
       const authorization = practiceAuthorization(authTarget);
       if (authorization) { location.replace(authorization); return; }
       if (authTarget && location.hash !== authTarget) location.hash = authTarget; else await render();
@@ -306,12 +342,12 @@ document.addEventListener('submit', async event => {
       $('#message-dialog').close(); toast(form.dataset.decision === 'approved' ? '审核已通过，题库已公开' : '已驳回，作者可查看原因'); await render();
     } else if (form.id === 'comment-form') { await api('/api/packs/' + currentPack.id + '/comments', jsonOptions({ body: new FormData(form).get('body') })); toast('评论已发布'); await render(); }
     else if (form.id === 'report-form') { await api('/api/packs/' + currentPack.id + '/report', jsonOptions({ reason: new FormData(form).get('reason') })); $('#message-dialog').close(); toast('举报已提交'); }
-  } catch (error) { if (errorNode) errorNode.textContent = error.message; else toast(error.message); if (form.id === 'auth-form' && form.dataset.mode === 'register') await refreshInvitationPolicy(form).catch(() => {}); }
-  finally { button.disabled = form.id === 'auth-form' && form.dataset.mode === 'register' && !registrationReady; }
+  } catch (error) { if (errorNode) errorNode.textContent = error.message; else toast(error.message); if (form.id === 'auth-form' && form.dataset.mode !== 'login') await refreshInvitationPolicy(form).catch(() => {}); }
+  finally { button.disabled = form.id === 'auth-form' && form.dataset.mode !== 'login' && !contactReady(); }
 });
 window.addEventListener('hashchange', () => { document.querySelectorAll('dialog[open]').forEach(d => d.close()); window.scrollTo(0, 0); render(); });
 for (const dialog of document.querySelectorAll('dialog')) dialog.addEventListener('click', event => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } });
 $('#auth-dialog').addEventListener('close', clearCaptcha);
-try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; cloudEnabled = config.cloudEnabled; practiceOrigin = config.practiceOrigin || ''; invitationRequired = !!config.invitationRequired; adminEnabled = !!config.adminEnabled; officialAiEnabled = !!config.officialAi?.enabled; } catch (error) { toast(error.message); }
+try { const [identity, config] = await Promise.all([api('/api/me'), api('/api/config')]); user = identity.user; maxArchiveMB = config.maxArchiveMB; registrationReady = config.registrationReady; registrationMethods = config.registrationMethods || { email: registrationReady, phone: false }; captchaSiteKey = config.turnstileSiteKey; localImport = config.localImport; cloudEnabled = config.cloudEnabled; practiceOrigin = config.practiceOrigin || ''; invitationRequired = !!config.invitationRequired; adminEnabled = !!config.adminEnabled; officialAiEnabled = !!config.officialAi?.enabled; } catch (error) { toast(error.message); }
 account(); await render(); cloudDownloadButton();
 new MutationObserver(cloudDownloadButton).observe(app, { childList: true, subtree: true });

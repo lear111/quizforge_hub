@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { CloudError } from '../cloud/accounts.mjs';
+import { validHubIdentity, syncHubIdentity } from '../accounts.mjs';
 import { ReviewPackages } from './review-packages.mjs';
 import { extensionDigest } from '../cloud/extension-review.mjs';
 import path from 'node:path';
@@ -24,8 +25,8 @@ export function createPracticeAdminBridge({ library, authenticate, hubPort = 431
   if (!library) throw new Error('Practice administration requires the pinned library runtime');
   const { db, accounts } = library, reviews = suppliedReviews || new ReviewPackages(library);
   const sync = user => {
-    if (!uuid(user?.id) || typeof user.name !== 'string' || typeof user.email !== 'string' || ![0, 1].includes(user.admin)) throw new CloudError(503, 'Hub 用户信息无效');
-    db.prepare("INSERT INTO users(id,email,name,password,admin,created) VALUES (?,?,?,'!external-auth',?,?) ON CONFLICT(id) DO UPDATE SET email=excluded.email,name=excluded.name,admin=excluded.admin").run(user.id, user.email, user.name, user.admin, new Date().toISOString());
+    if (!validHubIdentity(user)) throw new CloudError(503, 'Hub 用户信息无效');
+    syncHubIdentity(db, user);
     return user;
   };
   const server = http.createServer(async (req, res) => {
@@ -76,7 +77,7 @@ export function createPracticeAdminBridge({ library, authenticate, hubPort = 431
       } else if (route === '/extensions/affected' && req.method === 'GET') {
         const digest = url.searchParams.get('digest'), page = Math.max(1, Math.min(100000, Math.trunc(Number(url.searchParams.get('page')) || 1)));
         if (!/^[a-f0-9]{64}$/.test(digest || '')) throw new CloudError(400, '拓展摘要无效');
-        const rows = db.prepare("SELECT c.id,c.user_id,c.title,u.name,u.email FROM cloud_imports c JOIN users u ON u.id=c.user_id WHERE c.status='ready' ORDER BY c.created DESC,c.id LIMIT 50 OFFSET ?").all((page - 1) * 50);
+        const rows = db.prepare("SELECT c.id,c.user_id,c.title,u.name,u.email,(SELECT phone FROM user_phones WHERE user_id=u.id) AS phone FROM cloud_imports c JOIN users u ON u.id=c.user_id WHERE c.status='ready' ORDER BY c.created DESC,c.id LIMIT 50 OFFSET ?").all((page - 1) * 50);
         const items = [], errors = [];
         for (const row of rows) {
           try { if (library.runtime.scanExtensions(path.join(library.location(row.user_id, row.id), 'extensions')).some(directory => extensionDigest(directory).digest === digest)) items.push(row); }

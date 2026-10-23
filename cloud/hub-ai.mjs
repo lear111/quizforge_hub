@@ -26,7 +26,7 @@ export async function hubAccount(hubAi, req) {
   const result = await hubAi.call(req, 'me');
   if (result.status === 401) return { connected: false, expired: true };
   if (result.status !== 200 || !result.body?.ai) return { connected: true, unavailable: true, manageUrl: hubAi.manageUrl };
-  return { connected: true, user: { name: result.body.user.name, email: result.body.user.email }, ai: result.body.ai, manageUrl: hubAi.manageUrl };
+  return { connected: true, user: { name: result.body.user.name, email: result.body.user.email, ...(result.body.user.phone ? { phone: result.body.user.phone } : {}) }, ai: result.body.ai, manageUrl: hubAi.manageUrl };
 }
 
 export async function hubRedeem(hubAi, req, code) {

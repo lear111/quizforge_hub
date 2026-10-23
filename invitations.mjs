@@ -69,7 +69,7 @@ export function createInvitations(db, now = Date.now) {
     },
     list(actor) {
       admin(actor);
-      return db.prepare('SELECT i.id,i.prefix,i.created,i.expires,i.revoked,i.used,i.user_id,u.email AS used_by FROM invitations i LEFT JOIN users u ON u.id=i.user_id ORDER BY i.created DESC,i.id LIMIT 1000').all().map(row => ({ ...row, state: row.used !== null ? 'used' : row.revoked !== null ? 'revoked' : row.expires <= now() ? 'expired' : 'available' }));
+      return db.prepare('SELECT i.id,i.prefix,i.created,i.expires,i.revoked,i.used,i.user_id,COALESCE(u.email,u.name) AS used_by FROM invitations i LEFT JOIN users u ON u.id=i.user_id ORDER BY i.created DESC,i.id LIMIT 1000').all().map(row => ({ ...row, state: row.used !== null ? 'used' : row.revoked !== null ? 'revoked' : row.expires <= now() ? 'expired' : 'available' }));
     },
     revoke(actor, id) {
       admin(actor); db.exec('BEGIN IMMEDIATE');

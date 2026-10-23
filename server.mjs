@@ -24,6 +24,9 @@ import { createConnect, ConnectError } from './connect.mjs';
 import { createOfficialAi, officialAiSettings, shanghaiDay } from './official-ai.mjs';
 import { createOfficialAiConfig, masterKey } from './official-ai-config.mjs';
 import { createAiPoints } from './ai-points.mjs';
+import { initializeContacts, loginContact, accountByContact, accountProfile, validHubIdentity, syncHubIdentity } from './accounts.mjs';
+import { createContactCodes, ContactCodeError } from './contact-codes.mjs';
+import { smsSettings, createSmsProvider } from './sms.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
@@ -45,7 +48,7 @@ export async function createApp(options = {}) {
   await mkdir(uploadDir, { recursive: true });
   const db = new DatabaseSync(path.join(dataDir, 'hub.sqlite'));
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
-    CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL, password TEXT NOT NULL, admin INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, name TEXT NOT NULL, password TEXT NOT NULL, admin INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS packs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, summary TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL, tags TEXT NOT NULL, version TEXT NOT NULL, downloads INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, updated TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, pack_id TEXT NOT NULL REFERENCES packs(id) ON DELETE CASCADE, kind TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL);
@@ -55,6 +58,7 @@ export async function createApp(options = {}) {
     CREATE INDEX IF NOT EXISTS files_pack ON files(pack_id);
     CREATE INDEX IF NOT EXISTS comments_pack ON comments(pack_id, created);
   `);
+  initializeContacts(db);
   // A legacy published pack also enters review when moderation is first enabled.
   const columns = new Set(db.prepare('PRAGMA table_info(packs)').all().map(c => c.name));
   db.exec('BEGIN IMMEDIATE');
@@ -69,6 +73,8 @@ export async function createApp(options = {}) {
   const provider = options.mailProvider || createMailProvider(mailSettings());
   const reviewNotifier = createReviewNotifications(db, options.reviewNotificationProvider || provider, reviewEmail, options.now);
   const emailCodes = createEmailCodes(db, provider, options.now);
+  const smsProvider = options.smsProvider || createSmsProvider(smsSettings());
+  const contactCodes = createContactCodes(db, { email: provider, phone: smsProvider }, options.now, smsProvider.dailyLimit ?? 100);
   const invitations = createInvitations(db, options.now);
   const metrics = new ActivityMetrics(db, options.now);
   const adminEnabled = options.adminEnabled ?? process.env.ADMIN_ENABLED === '1';
@@ -124,7 +130,7 @@ export async function createApp(options = {}) {
     if (options.identityProvider) return req.externalHubIdentity || null;
     const raw = sessionPattern.exec(req.headers.cookie || '')?.[1];
     if (!raw) return null;
-    return db.prepare('SELECT u.id,u.name,u.email,u.admin FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id=u.id)').get(hash(raw), Date.now()) || null;
+    return db.prepare('SELECT u.id,u.name,u.email,p.phone,u.admin FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN user_phones p ON p.user_id=u.id WHERE s.token=? AND s.expires>? AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id=u.id)').get(hash(raw), Date.now()) || null;
   };
   const requireUser = req => identity(req) || fail(401, '请先登录');
   const requireAdmin = req => { const user = requireUser(req); if (!user.admin) fail(403, '仅管理员可审核题库'); return user; };
@@ -298,8 +304,8 @@ export async function createApp(options = {}) {
       if (options.identityProvider) {
         const user = await options.identityProvider(req);
         if (user) {
-          if (!/^[a-f0-9-]{36}$/.test(user.id) || typeof user.email !== 'string' || typeof user.name !== 'string' || ![0, 1].includes(user.admin)) fail(503, '登录信息无效');
-          db.prepare("INSERT INTO users(id,email,name,password,admin,created) VALUES (?,?,?,'!external-auth',?,?) ON CONFLICT(id) DO UPDATE SET email=excluded.email,name=excluded.name,admin=excluded.admin").run(user.id, user.email, user.name, user.admin, iso());
+          if (!validHubIdentity(user)) fail(503, '登录信息无效');
+          syncHubIdentity(db, user);
           req.externalHubIdentity = user;
         }
         if (pathname.startsWith('/api/auth/')) fail(403, '请通过 Hub 统一登录');
@@ -324,7 +330,7 @@ export async function createApp(options = {}) {
         if (req.headers.host !== `127.0.0.1:${server.address().port}` || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) fail(403, '仅允许服务内部访问');
         if (!aiConfig.enabled()) throw new ConnectError(404, 'OFFICIAL_AI_DISABLED', '免费 AI 暂未开放');
         const user = identity(req) || (() => { throw new ConnectError(401, 'HUB_LOGIN_REQUIRED', '登录已失效，请重新登录 Hub'); })();
-        if (pathname === '/internal/ai/me' && req.method === 'GET') { json(res, 200, { user: { name: user.name, email: user.email }, ai: officialAi.usage(user.id) }); return; }
+        if (pathname === '/internal/ai/me' && req.method === 'GET') { json(res, 200, { user: { name: user.name, email: user.email, phone: user.phone }, ai: officialAi.usage(user.id) }); return; }
         if (pathname === '/internal/ai/redeem' && req.method === 'POST') { throttle(req, 'connect-redeem', 10, user.id); json(res, 200, aiPoints.redeem(user.id, (await bodyJson(req)).code)); return; }
         if (pathname === '/internal/ai/chat/completions' && req.method === 'POST') { await officialAi.complete(req, res, user.id); return; }
         fail(404, '页面不存在');
@@ -368,7 +374,7 @@ export async function createApp(options = {}) {
         res.writeHead(result.status, { 'Content-Type': result.type, 'Content-Length': result.bytes.length, 'Cache-Control': 'no-store' }); res.end(result.bytes); return;
       }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
-      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready, invitationRequired: invitationPolicy.required(), turnstileSiteKey: emailCodes.siteKey, cloudEnabled, practiceOrigin, adminEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' }, officialAi: { enabled: aiConfig.enabled(), protocolVersion: 1 } }); return; }
+      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready || smsProvider.ready, registrationMethods: { email: !!emailCodes.ready, phone: !!smsProvider.ready }, invitationRequired: invitationPolicy.required(), turnstileSiteKey: emailCodes.siteKey || smsProvider.siteKey || '', cloudEnabled, practiceOrigin, adminEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' }, officialAi: { enabled: aiConfig.enabled(), protocolVersion: 1 } }); return; }
       if (await connect.handle(req, res, url)) return;
       if (await officialAi.handle(req, res, url)) return;
       if (await handleAdmin(req, res, url)) return;
@@ -385,35 +391,78 @@ export async function createApp(options = {}) {
         await emailCodes.send(email, ip || '', input.captchaToken, hostname);
         json(res, 200, { message: '如果该邮箱可以注册，验证码将发送到邮箱，请检查收件箱和垃圾邮件。', retryAfter: 60 }); return;
       }
+      if (pathname === '/api/auth/phone-code' && req.method === 'POST') {
+        throttle(req, 'phone-code', 6);
+        const input = await bodyJson(req);
+        if (invitationPolicy.required()) invitations.check(input.invitationCode);
+        if (!smsProvider.ready) fail(503, '手机验证暂未开放，请使用邮箱');
+        const contact = loginContact(input);
+        if (contact?.channel !== 'phone') fail(400, '请填写中国大陆手机号');
+        const ip = process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
+        const hostname = new URL(publicOrigin || `http://${req.headers.host}`).hostname;
+        await contactCodes.send(contact, 'register', ip || '', input.captchaToken, hostname, !accountByContact(db, contact));
+        json(res, 200, { message: '如果该手机号可以注册，验证码将通过短信发送，请注意查收。', retryAfter: 60 }); return;
+      }
+      // Add a missing contact to this account; never replace or merge accounts.
+      if (['/api/account/contact-code', '/api/account/contact'].includes(pathname) && req.method === 'POST') {
+        const user = requireUser(req); throttle(req, 'bind-contact', 8, user.id);
+        const input = await bodyJson(req), contact = loginContact(input);
+        if (!contact) fail(400, '请填写邮箱或中国大陆手机号');
+        if (!await verifyPassword(user.id, input.password)) fail(401, '请填写当前账号的正确密码');
+        const current = accountProfile(db, user.id);
+        if (current[contact.channel]) fail(409, '此类联系方式已绑定，暂不支持换绑');
+        if (accountByContact(db, contact)) fail(409, '该联系方式无法绑定，请使用其他联系方式');
+        if (pathname.endsWith('contact-code')) {
+          const ip = process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
+          await contactCodes.send(contact, 'bind:' + user.id, ip || '', input.captchaToken, new URL(publicOrigin || `http://${req.headers.host}`).hostname);
+          json(res, 200, { message: '验证码已发送，请查收。', retryAfter: 60 });
+        } else {
+          try { contactCodes.consume(contact, 'bind:' + user.id, input.code, () => {
+            if (accountProfile(db, user.id)[contact.channel]) fail(409, '此类联系方式已绑定，暂不支持换绑');
+            if (accountByContact(db, contact)) fail(409, '该联系方式无法绑定，请使用其他联系方式');
+            if (contact.channel === 'phone') db.prepare('INSERT INTO user_phones VALUES (?,?,?)').run(user.id, contact.value, Date.now());
+            else db.prepare('UPDATE users SET email=? WHERE id=?').run(contact.value, user.id);
+          }); } catch (error) { if (error.message.includes('UNIQUE')) fail(409, '该联系方式无法绑定，请使用其他联系方式'); throw error; }
+          json(res, 200, { user: accountProfile(db, user.id) });
+        }
+        return;
+      }
       if (['/api/auth/register', '/api/auth/login'].includes(pathname) && req.method === 'POST') {
         throttle(req, 'auth', 12);
         const input = await bodyJson(req);
-        const email = text(input.email, '邮箱', 180).toLowerCase();
+        const contact = loginContact(input);
+        if (!contact) fail(400, '请填写邮箱或中国大陆手机号，二选一即可');
+        const email = contact.channel === 'email' ? contact.value : null;
         const password = input.password;
         if (typeof password !== 'string' || password.length > 128) fail(400, '密码格式不正确');
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, '邮箱格式不正确');
         if (password.length < 10) fail(400, '密码至少需要 10 个字符');
         if (pathname.endsWith('register')) {
-          if (!emailCodes.ready) fail(503, '注册邮件暂未开放，请稍后再来');
+          if (!(contact.channel === 'email' ? emailCodes.ready : smsProvider.ready)) fail(503, contact.channel === 'email' ? '注册邮件暂未开放，请稍后再来' : '手机验证暂未开放，请使用邮箱');
           if (invitationPolicy.required()) invitations.check(input.invitationCode);
           const name = text(input.name, '昵称', 30);
           const salt = randomBytes(16).toString('hex');
           const digest = (await derive(password, salt, 64)).toString('hex');
           const id = randomUUID();
-          try { emailCodes.consume(email, input.code, () => {
+          const createUser = () => {
+            if (accountByContact(db, contact)) fail(409, '该联系方式已注册，请直接登录');
             db.prepare('INSERT INTO users (id,email,name,password,created) VALUES (?,?,?,?,?)').run(id, email, name, `${salt}:${digest}`, iso());
+            if (contact.channel === 'phone') db.prepare('INSERT INTO user_phones VALUES (?,?,?)').run(id, contact.value, Date.now());
             // Re-read inside the final account transaction: an administrator
             // can enable the gate while password hashing is still in flight.
             if (invitationPolicy.required()) invitations.consume(input.invitationCode, id);
-          }); }
-          catch (e) { if (e.message.includes('UNIQUE')) fail(409, '该邮箱已注册'); throw e; }
-          session(res, id); json(res, 201, { user: { id, email, name, admin: 0 } }); return;
+          };
+          try {
+            if (contact.channel === 'email') emailCodes.consume(email, input.code, createUser);
+            else contactCodes.consume(contact, 'register', input.code, createUser);
+          } catch (e) { if (e.message.includes('UNIQUE')) fail(409, '该联系方式已注册，请直接登录'); throw e; }
+          session(res, id); json(res, 201, { user: accountProfile(db, id) }); return;
         }
-        const user = db.prepare('SELECT * FROM users WHERE email=?').get(email);
+        const user = accountByContact(db, contact);
         const [salt, digest] = (user?.password || `${'0'.repeat(32)}:${'0'.repeat(128)}`).split(':');
         const candidate = await derive(password, salt, 64);
-        if (!user || !timingSafeEqual(candidate, Buffer.from(digest, 'hex')) || db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(user.id)) fail(401, '邮箱或密码不正确，或账号已停用');
-        session(res, user.id); json(res, 200, { user: { id: user.id, email: user.email, name: user.name, admin: user.admin } }); return;
+        const expected = Buffer.from(digest || '', 'hex');
+        if (!user || expected.length !== candidate.length || !timingSafeEqual(candidate, expected) || db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(user.id)) fail(401, '账号或密码不正确，或账号已停用');
+        session(res, user.id); json(res, 200, { user: accountProfile(db, user.id) }); return;
       }
       if (pathname === '/api/auth/logout' && req.method === 'POST') {
         const raw = sessionPattern.exec(req.headers.cookie || '')?.[1];
@@ -556,7 +605,7 @@ export async function createApp(options = {}) {
     } catch (e) {
       if (res.headersSent) { res.destroy(); return; }
       if (e instanceof ConnectError) { json(res, e.status, { error: { code: e.code, message: e.message, ...e.extra } }); return; }
-      const status = e instanceof ApiError || e instanceof EmailCodeError || e instanceof InvitationError || e instanceof CloudError ? e.status : e.code === 'ENOENT' ? 404 : 500;
+      const status = e instanceof ApiError || e instanceof EmailCodeError || e instanceof ContactCodeError || e instanceof InvitationError || e instanceof CloudError ? e.status : e.code === 'ENOENT' ? 404 : 500;
       if (status === 500) console.error('Request failed:', e.name, e.code || 'internal');
       const message = status === 500 ? '服务器暂时无法处理，请稍后重试' : status === 404 && !(e instanceof ApiError) ? '文件不存在' : e.message;
       const scopedPractice = /^\/api\/cloud\/practice\/[a-f0-9-]{36}\/api\//.test(req.url.split('?')[0]);
@@ -574,6 +623,7 @@ if (import.meta.main) {
   if (privateFile) {
     try { process.loadEnvFile(privateFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
+  if (process.env.SMS_ENV_FILE) process.loadEnvFile(process.env.SMS_ENV_FILE);
   const { server } = await createApp();
   const port = Number(process.env.PORT || 4318); const host = process.env.HOST || '127.0.0.1';
   const browserHost = host === '127.0.0.1' ? 'localhost' : host;

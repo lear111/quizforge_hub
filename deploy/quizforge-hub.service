@@ -18,6 +18,8 @@ Environment=TRUST_PROXY=1
 Environment=MONTHLY_FILE_BUDGET_GB=150
 Environment=BILLING_TIMEZONE=Asia/Shanghai
 EnvironmentFile=-/etc/quizforge-hub/mail.env
+# Optional phone verification; leave disabled until a real SMS receipt test passes.
+EnvironmentFile=-/etc/quizforge-hub/sms.env
 # AI service (docs/HUB_CONNECT_AI.md 8): OFFICIAL_AI_MASTER_KEY and optional form defaults; root-only, never in Git.
 EnvironmentFile=-/etc/quizforge-hub/official-ai.env
 Restart=on-failure

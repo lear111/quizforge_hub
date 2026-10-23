@@ -1,5 +1,6 @@
 import { randomBytes, createHash } from 'node:crypto';
 import { CloudError } from './accounts.mjs';
+import { validHubIdentity } from '../accounts.mjs';
 import { importReturnPath } from './hub-source.mjs';
 
 const fresh = () => randomBytes(32).toString('hex');
@@ -29,8 +30,8 @@ export class HubLogin {
     if (!result.ok) throw new CloudError(503, 'Hub 登录服务暂时不可用，请稍后重试');
     const { user } = await result.json();
     if (!user) return null;
-    if (!/^[a-f0-9-]{36}$/.test(user.id) || typeof user.name !== 'string' || user.name.length > 200 || typeof user.email !== 'string' || user.email.length > 200 || ![0, 1].includes(user.admin)) throw new CloudError(503, 'Hub 登录响应无效');
-    return { id: user.id, name: user.name, email: user.email, admin: user.admin };
+    if (!validHubIdentity(user)) throw new CloudError(503, 'Hub 登录响应无效');
+    return { id: user.id, name: user.name, email: user.email, ...(user.phone ? { phone: user.phone } : {}), admin: user.admin };
   }
   async resolve(req) {
     this.sweep();

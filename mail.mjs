@@ -56,14 +56,14 @@ export function createMailProvider(settings, fetcher = fetch) {
       if (!settings.reviewReady) throw new Error('ReviewMailDisabled');
       return deliver(signedTemplateRequest(settings, email, 'QuizForge 有题库等待审核', settings.reviewTemplateId));
     },
-    async verify(token, ip, hostname) {
+    async verify(token, ip, hostname, action = 'register_email') {
       if (!settings.ready || typeof token !== 'string' || !token || token.length > 2048) return false;
       const response = await fetcher('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ secret: settings.captchaSecret, response: token, remoteip: ip }), signal: AbortSignal.timeout(10000),
       });
       const result = await response.json();
-      return response.ok && result.success === true && result.action === 'register_email' && result.hostname === hostname;
+      return response.ok && result.success === true && result.action === action && result.hostname === hostname;
     },
     async send(email, code) {
       if (!settings.ready) throw new Error('MailDisabled');

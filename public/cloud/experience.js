@@ -54,7 +54,7 @@ export function bindCloudExperience({ document, beforeLogout }) {
       if (current !== epoch) return;
       if (!identity.user) throw Object.assign(new Error('登录已失效，请重新登录 Hub。'), { status: 401 });
       account = identity.user;
-      uc('name').textContent = account.name; uc('device').textContent = account.email; uc('avatar').textContent = Array.from(account.name)[0] || 'Q';
+      uc('name').textContent = account.name; uc('device').textContent = account.email || account.phone || ''; uc('avatar').textContent = Array.from(account.name)[0] || 'Q';
       for (const [id, field] of [['storage', 'storageBytes'], ['download', 'dailyTrafficBytes']]) {
         const used = resources.usage[field], limit = resources.limits[field], progress = get(`cloud-${id}-progress`);
         get(`cloud-${id}-value`).textContent = `${size(used)} / ${size(limit)}`;

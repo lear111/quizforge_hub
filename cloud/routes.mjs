@@ -16,6 +16,7 @@ export function cloudRoute({ accounts, library, reviewPackages, requireUser, req
     }
     // Free AI with the signed-in account (docs/HUB_CONNECT_AI.md 7.3); errors keep their codes for the fallback.
     if (pathname.startsWith('/api/cloud/ai/')) {
+      if (!['/api/cloud/ai/hub', '/api/cloud/ai/hub/redeem', '/api/cloud/ai/complete'].includes(pathname)) throw new CloudError(404, '云端接口不存在');
       try {
         if (!hubAi) throw Object.assign(new CloudError(503, '免费 AI 暂时不可用'), { code: 'AI_OFFICIAL_UNAVAILABLE' });
         if (pathname === '/api/cloud/ai/hub' && req.method === 'GET') { json(res, 200, await hubAccount(hubAi, req)); return true; }
