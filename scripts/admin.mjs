@@ -6,6 +6,7 @@ import { createInvitations, createInvitationPolicy } from '../invitations.mjs';
 import { createAuthPolicy } from '../auth-policy.mjs';
 import { randomUUID } from 'node:crypto';
 import { createAiPoints, UNIT } from '../ai-points.mjs';
+import { publishDownload, unpublishDownload } from '../downloads.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const db = new DatabaseSync(path.join(path.resolve(process.env.DATA_DIR || path.join(root, 'data')), 'hub.sqlite'));
@@ -17,6 +18,15 @@ if (action === 'signup-bonus') {
   try {
     if (identifier !== undefined) points.setSignupBonus(Math.round(Number(identifier) * UNIT));
     console.log(`新注册用户赠送免费 AI 额度：¥${(points.signupBonus() / UNIT).toFixed(2)}`);
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
+  db.close(); process.exit();
+}
+// Download page installers: `download-publish windows <file> 0.1.0-preview.4 预览版`, `download-remove android`.
+if (action === 'download-publish' || action === 'download-remove') {
+  const dataDir = path.resolve(process.env.DATA_DIR || path.join(root, 'data'));
+  try {
+    if (action === 'download-remove') console.log(unpublishDownload(dataDir, identifier) ? '已从下载页移除。' : '下载页没有这个平台的安装包。');
+    else { const [, , source, version, label] = process.argv.slice(2); console.log(JSON.stringify(publishDownload(dataDir, { platform: identifier, source, version, label }), null, 2)); }
   } catch (error) { console.error(error.message); process.exitCode = 1; }
   db.close(); process.exit();
 }

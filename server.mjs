@@ -24,6 +24,7 @@ import { createConnect, ConnectError } from './connect.mjs';
 import { createOfficialAi, officialAiSettings, shanghaiDay } from './official-ai.mjs';
 import { createOfficialAiConfig, masterKey } from './official-ai-config.mjs';
 import { createAiPoints } from './ai-points.mjs';
+import { createDownloads } from './downloads.mjs';
 import { initializeContacts, loginContact, accountByContact, accountProfile, validHubIdentity, syncHubIdentity, setContactVerified } from './accounts.mjs';
 import { createContactCodes, ContactCodeError } from './contact-codes.mjs';
 import { smsSettings, createSmsProvider } from './sms.mjs';
@@ -302,6 +303,7 @@ export async function createApp(options = {}) {
     return expected.length === candidate.length && timingSafeEqual(candidate, expected);
   };
   const aiPoints = createAiPoints({ db, master: aiMaster, now: options.now });
+  const handleDownloads = createDownloads({ dataDir, json, reserveTraffic });
   const requestIp = req => process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
   const hostname = req => new URL(publicOrigin || `http://${req.headers.host}`).hostname;
   const requireCaptcha = async (req, input, action) => {
@@ -408,6 +410,7 @@ export async function createApp(options = {}) {
       }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
       if (pathname === '/api/admin-contact' && req.method === 'GET') { json(res, 200, await (options.adminContactSource || adminContact.get)()); return; }
+      if (!options.practiceHome && await handleDownloads(req, res, url)) return;
       if (pathname === '/api/config' && req.method === 'GET') {
         const policy = authPolicy.get(), methods = policy.registrationCodeRequired || policy.loginCodeRequired ? verificationMethods() : { email: true, phone: true };
         const ready = (!policy.registrationCaptchaRequired || captchaProvider.ready) && (methods.email || methods.phone);
@@ -654,6 +657,7 @@ export async function createApp(options = {}) {
         assets['/admin-contact.js'] = ['admin-contact.js', 'text/javascript'];
         assets['/admin-contact.css'] = ['admin-contact.css', 'text/css'];
         assets['/connect.js'] = ['connect.js', 'text/javascript'];
+        if (!options.practiceHome) { assets['/download'] = ['download.html', 'text/html']; assets['/download.js'] = ['download.js', 'text/javascript']; }
         if (adminEnabled) {
           if (pathname === '/admin/') { if (!identity(req)) { res.writeHead(303, { Location: '/manage/#admin', 'Cache-Control': 'no-store' }).end(); return; } requireAdmin(req); }
           assets['/admin/'] = ['admin/index.html', 'text/html']; assets['/admin/app.js'] = ['admin/app.js', 'text/javascript']; assets['/admin/ai.js'] = ['admin/ai.js', 'text/javascript']; assets['/admin/admin.css'] = ['admin/admin.css', 'text/css'];
