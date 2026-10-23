@@ -10,9 +10,10 @@ export function createContactCodes(db, providers, now = Date.now, dailySmsLimit 
     CREATE TABLE IF NOT EXISTS contact_sends(id TEXT PRIMARY KEY,channel TEXT NOT NULL,address_key TEXT NOT NULL,ip_key TEXT NOT NULL,created INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS contact_sends_address ON contact_sends(channel,address_key,created);
     CREATE INDEX IF NOT EXISTS contact_sends_ip ON contact_sends(channel,ip_key,created);`);
+  if (!db.prepare('PRAGMA table_info(contact_codes)').all().some(column => column.name === 'captcha_verified')) db.exec('ALTER TABLE contact_codes ADD COLUMN captcha_verified INTEGER NOT NULL DEFAULT 1');
   const providerFor = channel => {
     const provider = providers[channel];
-    if (!provider?.ready) fail(503, channel === 'phone' ? '手机验证暂未开放，请使用邮箱' : '邮箱验证暂未开放，请稍后再试');
+    if (!(provider?.deliveryReady ?? provider?.ready)) fail(503, channel === 'phone' ? '手机验证暂未开放，请使用邮箱' : '邮箱验证暂未开放，请稍后再试');
     return provider;
   };
   const keys = (channel, address, purpose) => {
@@ -27,12 +28,14 @@ export function createContactCodes(db, providers, now = Date.now, dailySmsLimit 
     if (count('created>?', time - 86400000) >= (channel === 'phone' ? dailySmsLimit : 100)) fail(429, '今天的验证发送额度已用完，请稍后再来');
   };
   return {
-    async send(contact, purpose, ip, token, hostname, eligible = true) {
+    async send(contact, purpose, ip, token, hostname, eligible = true, { captchaRequired = true, captchaAction, verifyCaptcha } = {}) {
       const { channel, value } = contact, { provider, key, addressKey, subject } = keys(channel, value, purpose), ipKey = key(ip);
       limits(channel, addressKey, ipKey, now());
       let verified = false;
-      try { verified = await provider.verify(token, ip, hostname, purpose === 'register' ? 'register_phone' : 'bind_contact'); } catch { /* fail closed */ }
-      if (!verified) fail(400, '人机验证未通过，请重试');
+      if (captchaRequired) {
+        try { verified = await (verifyCaptcha || provider.verify.bind(provider))(token, ip, hostname, captchaAction || (purpose === 'register' ? 'register_phone' : 'bind_contact')); } catch { /* fail closed */ }
+        if (!verified) fail(400, '人机验证未通过，请重试');
+      }
       const time = now(), nonce = randomUUID(), code = String(randomInt(0, 1000000)).padStart(6, '0');
       db.exec('BEGIN IMMEDIATE');
       try {
@@ -40,11 +43,11 @@ export function createContactCodes(db, providers, now = Date.now, dailySmsLimit 
         db.prepare('DELETE FROM contact_sends WHERE created<=?').run(time - 86400000);
         db.prepare('DELETE FROM contact_codes WHERE expires<=?').run(time);
         db.prepare('INSERT INTO contact_sends VALUES (?,?,?,?,?)').run(nonce, channel, addressKey, ipKey, time);
-        db.prepare("INSERT INTO contact_codes VALUES (?,?,?,?,?,0,'pending') ON CONFLICT(channel,subject) DO UPDATE SET nonce=excluded.nonce,digest=excluded.digest,expires=excluded.expires,attempts=0,state='pending'").run(channel, subject, nonce, key(`${nonce}:${subject}:${code}`), time + 600000);
+        db.prepare("INSERT INTO contact_codes(channel,subject,nonce,digest,expires,attempts,state,captcha_verified) VALUES (?,?,?,?,?,0,'pending',?) ON CONFLICT(channel,subject) DO UPDATE SET nonce=excluded.nonce,digest=excluded.digest,expires=excluded.expires,attempts=0,state='pending',captcha_verified=excluded.captcha_verified").run(channel, subject, nonce, key(`${nonce}:${subject}:${code}`), time + 600000, +verified);
         db.exec('COMMIT');
       } catch (error) { db.exec('ROLLBACK'); throw error; }
       try {
-        if (eligible) await provider.send(value, code, nonce);
+        if (eligible) await provider.send(value, code, nonce, { purpose });
         db.prepare('UPDATE contact_codes SET state=? WHERE channel=? AND subject=? AND nonce=? AND state=\'pending\'').run(eligible ? 'sent' : 'failed', channel, subject, nonce);
       } catch {
         db.prepare("UPDATE contact_codes SET state='failed' WHERE channel=? AND subject=? AND nonce=?").run(channel, subject, nonce);
@@ -52,7 +55,7 @@ export function createContactCodes(db, providers, now = Date.now, dailySmsLimit 
         fail(503, '验证码暂时无法发送，请稍后重新获取');
       }
     },
-    consume(contact, purpose, code, updateAccount) {
+    consume(contact, purpose, code, updateAccount, { captchaRequired = false } = {}) {
       const { channel, value } = contact, { key, subject } = keys(channel, value, purpose);
       db.exec('BEGIN IMMEDIATE');
       try {
@@ -62,7 +65,8 @@ export function createContactCodes(db, providers, now = Date.now, dailySmsLimit 
         if (!/^\d{6}$/.test(String(code ?? '')) || !timingSafeEqual(Buffer.from(candidate, 'hex'), Buffer.from(row.digest, 'hex'))) {
           db.prepare('UPDATE contact_codes SET attempts=attempts+1 WHERE channel=? AND subject=?').run(channel, subject); db.exec('COMMIT'); fail(400, '验证码不正确，请重新输入');
         }
-        updateAccount();
+        if ((typeof captchaRequired === 'function' ? captchaRequired() : captchaRequired) && !row.captcha_verified) fail(409, '验证设置已更新，请完成人机验证后重新获取验证码');
+        updateAccount({ captchaVerified: !!row.captcha_verified });
         db.prepare("UPDATE contact_codes SET state='consumed' WHERE channel=? AND subject=?").run(channel, subject);
         db.exec('COMMIT');
       } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }

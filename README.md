@@ -22,7 +22,8 @@ node server.mjs
 ## 已实现
 
 - 独立账号注册、登录、退出，昵称公开而邮箱不公开。
-- 注册验证邮箱或中国大陆手机号其中一种；手机通道默认关闭，配置阿里云 PNVS 短信认证后可用。原腾讯云 SES 邮箱流程保留。验证码均为 6 位 / 10 分钟 / 5 次尝试 / 一次使用，经过 Turnstile 后端验证。
+- 管理后台“登录与注册”提供五个独立验证开关：登录／注册的邮箱或短信验证码、人机验证，以及注册邀请码。固定保留登录账号密码和注册用户名、账号、密码；修改后点击“保存并生效”。见 [登录注册管理说明](docs/AUTH_POLICY.md)。
+- 注册默认验证邮箱或中国大陆手机号其中一种并完成人机验证；手机通道默认关闭，配置阿里云 PNVS 短信认证后可用。原腾讯云 SES 邮箱流程保留。验证码均为 6 位 / 10 分钟 / 5 次尝试 / 一次使用。
 - 邮箱或手机号配合密码登录；在“我的分享 → 账号联系方式”可补绑另一种联系方式，保留账号 ID、已有设备授权与免费 AI 余额。配置、数据迁移及验收边界见 [手机验证说明](docs/PHONE_AUTH.md)。
 - 邮件发送额度存入 SQLite：邮箱 60 秒冷却、24 小时 5 次；IP 10 分钟 5 次、24 小时 20 次；全站滚动 24 小时最多 100 次。失败或超时也保留发送预留量。
 - 搜索题库名称、简介、标签，按最近更新 / 下载请求量排序，分页显示题库。首版不做分类。
@@ -53,9 +54,9 @@ node scripts/admin.mjs demote 管理员邮箱
 
 注册邮件默认关闭，已有账号仍可登录。Windows 直接启动时自动读取当前用户的 `.codex/secrets/quizforge-hub/mail.env`，也可通过 `MAIL_ENV_FILE` 指定私有文件。Linux 使用 systemd 的 `/etc/quizforge-hub/mail.env`，示例见 `deploy/mail.env.example`。不要将真实密钥提交到源码、OneDrive 或公开静态目录。
 
-启用需要腾讯云 SecretId / SecretKey、地域、发信地址、模板 ID、稳定的随机 `EMAIL_CODE_PEPPER`，以及真实的 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`。任何一项缺失或使用 Turnstile 测试密钥，都拒绝发信和新注册。确认配置与收信测试后，将 `TENCENT_SES_ENABLED` 设为 `1` 并重启。前端仅收到可用状态和公开站点键。
+启用邮件发送需要腾讯云 SecretId / SecretKey、地域、发信地址、模板 ID、稳定的随机 `EMAIL_CODE_PEPPER`。人机验证独立需要真实的 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`，不接受测试密钥；默认注册同时要求两种验证，管理员可分别配置。确认配置与收信测试后，将 `TENCENT_SES_ENABLED` 设为 `1` 并重启。前端仅收到可用状态和公开站点键。
 
-Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 `localhost` / `127.0.0.1`。后端强制校验 token、`register_email` action 和当前网站 hostname；验证服务异常时不发信。验证码不能直接绕过邮件接口提交注册；账号插入和验证码消耗在同一 SQLite 事务中完成。既有账号请求验证码会收到一致的公开响应，但不会发送新邮件。
+Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 `localhost` / `127.0.0.1`。开启相应人机验证时，后端强制校验 token、对应用途 action 和当前网站 hostname；验证服务异常时拒绝该请求。开启注册验证码时，账号插入和验证码消耗在同一 SQLite 事务中完成。既有账号请求注册验证码会收到一致的公开响应，但不会发送新邮件。
 
 发送次数按滚动 24 小时保守计数，避免零点前后突发翻倍；不自动重试或退还失败预留量。100 封上限可能被攻击者耗尽导致暂停注册，不能等同于腾讯云账单上限。保持 `EMAIL_CODE_PEPPER` 稳定，随数据库一起私密备份；更换该值会使待用验证码失效并改变邮件/IP限额的识别键。
 
@@ -70,7 +71,7 @@ Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 
 | `DATA_DIR` | 项目下 `data` | 数据库、附件目录；不可放在公开静态目录中 |
 | `PUBLIC_ORIGIN` | 请求的本机 HTTP origin | 生产必须设置完整 HTTPS origin，例如 `https://hub.example.com`，不带末尾斜杠 |
 | `COOKIE_SECURE` | `0` | 本地 HTTP 为 0，生产 HTTPS 必须为 1 |
-| `INVITATION_REQUIRED` | `0` | 首次初始化邀请码验证开关；后续在管理后台的邀请码页面保存，重启保留管理员选择 |
+| `INVITATION_REQUIRED` | `0` | 首次初始化邀请码验证开关；后续在管理后台“登录与注册”保存，重启保留管理员选择 |
 | `TRUST_PROXY` | `0` | 生产只有在 Node 端口不对外开放、反向代理覆盖 `X-Real-IP` 时才设为 1 |
 | `LOCAL_IMPORT_ENABLED` | `0` | 设为 1 开启公共 .qbank 本地唤醒与固定版本下载，独立于云端功能；当前设备需安装支持协议 v1 的 QuizForge 客户端 |
 | `MAX_ARCHIVE_MB` | `20` | 单个压缩包上限，MiB；调整时同步修改反向代理请求体限制 |

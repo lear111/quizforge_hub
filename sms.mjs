@@ -6,7 +6,9 @@ export function smsSettings(env = process.env) {
   const settings = { enabled: env.ALIYUN_SMS_ENABLED === '1', accessKeyId: env.ALIYUN_SMS_ACCESS_KEY_ID, accessKeySecret: env.ALIYUN_SMS_ACCESS_KEY_SECRET,
     signName: env.ALIYUN_SMS_SIGN_NAME, templateCode: env.ALIYUN_SMS_TEMPLATE_CODE, pepper: env.SMS_CODE_PEPPER,
     siteKey: env.TURNSTILE_SITE_KEY, captchaSecret: env.TURNSTILE_SECRET_KEY, dailyLimit: Number(env.SMS_DAILY_LIMIT || 100) };
-  settings.ready = !!(settings.enabled && settings.accessKeyId && settings.accessKeySecret && settings.signName && settings.templateCode && settings.pepper?.length >= 32 && productionKey(settings.siteKey) && productionKey(settings.captchaSecret));
+  settings.deliveryReady = !!(settings.enabled && settings.accessKeyId && settings.accessKeySecret && settings.signName && settings.templateCode && settings.pepper?.length >= 32);
+  settings.captchaReady = !!(productionKey(settings.siteKey) && productionKey(settings.captchaSecret));
+  settings.ready = settings.deliveryReady && settings.captchaReady;
   return settings;
 }
 // PNVS OpenAPI 2017-05-25, query parameters (per official SDK metadata),
@@ -29,7 +31,7 @@ export function signedSmsRequest(settings, phone, code, outId, date = new Date()
 }
 export function createSmsProvider(settings, fetcher = fetch) {
   return {
-    ready: settings.ready, pepper: settings.pepper, siteKey: settings.ready ? settings.siteKey : '', dailyLimit: settings.dailyLimit,
+    ready: settings.ready, deliveryReady: settings.deliveryReady ?? settings.ready, captchaReady: settings.captchaReady ?? settings.ready, pepper: settings.pepper, siteKey: settings.siteKey || '', dailyLimit: settings.dailyLimit,
     async verify(token, ip, hostname, action) {
       if (!settings.ready || typeof token !== 'string' || !token || token.length > 2048) return false;
       const response = await fetcher('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', redirect: 'error',
@@ -38,7 +40,7 @@ export function createSmsProvider(settings, fetcher = fetch) {
       return response.ok && result.success === true && result.hostname === hostname && result.action === action;
     },
     async send(phone, code, nonce) {
-      if (!settings.ready) throw new Error('SmsDisabled');
+      if (!(settings.deliveryReady ?? settings.ready)) throw new Error('SmsDisabled');
       const request = signedSmsRequest(settings, phone, code, nonce);
       const response = await fetcher(request.url, { method: 'POST', redirect: 'error', credentials: 'omit', headers: request.headers, signal: AbortSignal.timeout(10000) });
       // Response data is deliberately discarded; it can contain provider diagnostics.

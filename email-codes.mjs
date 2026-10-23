@@ -11,6 +11,7 @@ export function createEmailCodes(db, provider, now = Date.now) {
     CREATE INDEX IF NOT EXISTS email_sends_email ON email_sends(email_key,created);
     CREATE INDEX IF NOT EXISTS email_sends_ip ON email_sends(ip_key,created);
     CREATE INDEX IF NOT EXISTS email_sends_time ON email_sends(created);`);
+  if (!db.prepare('PRAGMA table_info(email_codes)').all().some(column => column.name === 'captcha_verified')) db.exec('ALTER TABLE email_codes ADD COLUMN captcha_verified INTEGER NOT NULL DEFAULT 1');
   const key = value => createHmac('sha256', provider.pepper).update(value).digest('hex');
   const fingerprint = (nonce, email, code) => key(`${nonce}:${email}:${code}`);
   const limits = (emailKey, ipKey, time) => {
@@ -22,13 +23,15 @@ export function createEmailCodes(db, provider, now = Date.now) {
   };
   return {
     ready: provider.ready, siteKey: provider.siteKey || '',
-    async send(email, ip, token, hostname) {
-      if (!provider.ready) fail(503, '注册邮件暂未开放，请稍后再来');
+    async send(email, ip, token, hostname, { captchaRequired = true, verifyCaptcha } = {}) {
+      if (!(provider.deliveryReady ?? provider.ready)) fail(503, '注册邮件暂未开放，请稍后再来');
       const emailKey = key(email), ipKey = key(ip);
       limits(emailKey, ipKey, now());
       let verified = false;
-      try { verified = await provider.verify(token, ip, hostname); } catch { /* fail closed */ }
-      if (!verified) fail(400, '人机验证未通过，请重试');
+      if (captchaRequired) {
+        try { verified = await (verifyCaptcha || provider.verify.bind(provider))(token, ip, hostname, 'register_email'); } catch { /* fail closed */ }
+        if (!verified) fail(400, '人机验证未通过，请重试');
+      }
       const time = now(), nonce = randomUUID(), code = String(randomInt(0, 1000000)).padStart(6, '0');
       db.exec('BEGIN IMMEDIATE');
       try {
@@ -36,7 +39,7 @@ export function createEmailCodes(db, provider, now = Date.now) {
         db.prepare('DELETE FROM email_sends WHERE created<=?').run(time - 86400000);
         db.prepare('DELETE FROM email_codes WHERE expires<=?').run(time);
         db.prepare('INSERT INTO email_sends VALUES (?,?,?,?)').run(nonce, emailKey, ipKey, time);
-        db.prepare(`INSERT INTO email_codes (email_key,nonce,digest,expires,attempts,state) VALUES (?,?,?,?,0,'pending') ON CONFLICT(email_key) DO UPDATE SET nonce=excluded.nonce,digest=excluded.digest,expires=excluded.expires,attempts=0,state='pending'`).run(emailKey, nonce, fingerprint(nonce, email, code), time + 600000);
+        db.prepare(`INSERT INTO email_codes (email_key,nonce,digest,expires,attempts,state,captcha_verified) VALUES (?,?,?,?,0,'pending',?) ON CONFLICT(email_key) DO UPDATE SET nonce=excluded.nonce,digest=excluded.digest,expires=excluded.expires,attempts=0,state='pending',captcha_verified=excluded.captcha_verified`).run(emailKey, nonce, fingerprint(nonce, email, code), time + 600000, +verified);
         db.exec('COMMIT');
       } catch (error) { db.exec('ROLLBACK'); throw error; }
       // Existing accounts receive the same public response without another email.
@@ -52,8 +55,8 @@ export function createEmailCodes(db, provider, now = Date.now) {
         fail(503, '邮件暂时无法发送，请稍后重新获取验证码');
       }
     },
-    consume(email, code, createUser) {
-      if (!provider.ready) fail(503, '注册邮件暂未开放，请稍后再来');
+    consume(email, code, createUser, { captchaRequired = false } = {}) {
+      if (!(provider.deliveryReady ?? provider.ready)) fail(503, '注册邮件暂未开放，请稍后再来');
       const emailKey = key(email);
       db.exec('BEGIN IMMEDIATE');
       try {
@@ -66,7 +69,8 @@ export function createEmailCodes(db, provider, now = Date.now) {
           db.prepare('UPDATE email_codes SET attempts=attempts+1 WHERE email_key=?').run(emailKey);
           db.exec('COMMIT'); fail(400, '验证码不正确，请重新输入');
         }
-        createUser();
+        if ((typeof captchaRequired === 'function' ? captchaRequired() : captchaRequired) && !row.captcha_verified) fail(409, '验证设置已更新，请完成人机验证后重新获取验证码');
+        createUser({ captchaVerified: !!row.captcha_verified });
         db.prepare("UPDATE email_codes SET state='consumed' WHERE email_key=?").run(emailKey);
         db.exec('COMMIT');
       } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }

@@ -24,9 +24,11 @@ import { createConnect, ConnectError } from './connect.mjs';
 import { createOfficialAi, officialAiSettings, shanghaiDay } from './official-ai.mjs';
 import { createOfficialAiConfig, masterKey } from './official-ai-config.mjs';
 import { createAiPoints } from './ai-points.mjs';
-import { initializeContacts, loginContact, accountByContact, accountProfile, validHubIdentity, syncHubIdentity } from './accounts.mjs';
+import { initializeContacts, loginContact, accountByContact, accountProfile, validHubIdentity, syncHubIdentity, setContactVerified } from './accounts.mjs';
 import { createContactCodes, ContactCodeError } from './contact-codes.mjs';
 import { smsSettings, createSmsProvider } from './sms.mjs';
+import { createAuthPolicy } from './auth-policy.mjs';
+import { createCaptchaProvider } from './captcha.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
@@ -79,6 +81,18 @@ export async function createApp(options = {}) {
   const metrics = new ActivityMetrics(db, options.now);
   const adminEnabled = options.adminEnabled ?? process.env.ADMIN_ENABLED === '1';
   const invitationPolicy = createInvitationPolicy(db, options.invitationRequired ?? process.env.INVITATION_REQUIRED === '1');
+  const authPolicy = createAuthPolicy(db, invitationPolicy);
+  const testCaptchaSource = [provider, smsProvider].find(source => source.captchaReady ?? source.ready);
+  const captchaProvider = options.captchaProvider || (options.mailProvider || options.smsProvider ? { ready: !!testCaptchaSource,
+    siteKey: testCaptchaSource?.siteKey || '', verify: (...args) => testCaptchaSource?.verify?.(...args) || false } : createCaptchaProvider());
+  const verificationMethods = () => ({ email: !!(provider.deliveryReady ?? provider.ready), phone: !!(smsProvider.deliveryReady ?? smsProvider.ready) });
+  const authCapabilities = () => {
+    const methods = verificationMethods();
+    const emailUsed = db.prepare('SELECT 1 FROM users WHERE email IS NOT NULL LIMIT 1').get();
+    const phoneUsed = db.prepare('SELECT 1 FROM user_phones LIMIT 1').get();
+    return { emailCodeAvailable: methods.email, phoneCodeAvailable: methods.phone, captchaAvailable: !!captchaProvider.ready,
+      loginCodeAvailable: (methods.email || methods.phone) && (!emailUsed || methods.email) && (!phoneUsed || methods.phone) };
+  };
   const practiceOrigin = options.practiceOrigin ?? process.env.PRACTICE_ORIGIN ?? '';
   if (practiceOrigin && (new URL(practiceOrigin).origin !== practiceOrigin || new URL(practiceOrigin).protocol !== 'https:')) throw new Error('Invalid practice origin');
   const secureCookies = options.secureCookies ?? process.env.COOKIE_SECURE === '1';
@@ -130,7 +144,8 @@ export async function createApp(options = {}) {
     if (options.identityProvider) return req.externalHubIdentity || null;
     const raw = sessionPattern.exec(req.headers.cookie || '')?.[1];
     if (!raw) return null;
-    return db.prepare('SELECT u.id,u.name,u.email,p.phone,u.admin FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN user_phones p ON p.user_id=u.id WHERE s.token=? AND s.expires>? AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id=u.id)').get(hash(raw), Date.now()) || null;
+    const user = db.prepare('SELECT u.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND NOT EXISTS (SELECT 1 FROM user_blocks b WHERE b.user_id=u.id)').get(hash(raw), Date.now());
+    return user ? accountProfile(db, user.id) : null;
   };
   const requireUser = req => identity(req) || fail(401, '请先登录');
   const requireAdmin = req => { const user = requireUser(req); if (!user.admin) fail(403, '仅管理员可审核题库'); return user; };
@@ -285,7 +300,23 @@ export async function createApp(options = {}) {
     return expected.length === candidate.length && timingSafeEqual(candidate, expected);
   };
   const aiPoints = createAiPoints({ db, master: aiMaster, now: options.now });
-  const handleAdmin = createHubAdmin({ db, officialAi: aiConfig, aiPoints, verifyPassword, shanghaiDay, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
+  const requestIp = req => process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
+  const hostname = req => new URL(publicOrigin || `http://${req.headers.host}`).hostname;
+  const requireCaptcha = async (req, input, action) => {
+    let valid = false;
+    try { valid = await captchaProvider.verify(input.captchaToken, requestIp(req) || '', hostname(req), action); } catch { /* fail closed */ }
+    if (!valid) fail(400, '人机验证未通过，请重试');
+  };
+  const authenticate = async (contact, password) => {
+    if (typeof password !== 'string' || password.length < 10 || password.length > 128) fail(400, '密码至少需要 10 个字符，且不超过 128 个字符');
+    const user = accountByContact(db, contact);
+    const [salt, digest] = (user?.password || `${'0'.repeat(32)}:${'0'.repeat(128)}`).split(':');
+    const candidate = await derive(password, salt, 64), expected = Buffer.from(digest || '', 'hex');
+    if (!user || expected.length !== candidate.length || !timingSafeEqual(candidate, expected) || db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(user.id)) fail(401, '账号或密码不正确，或账号已停用');
+    return user;
+  };
+  const loginPurpose = user => 'login:' + user.id + ':' + hash(user.password);
+  const handleAdmin = createHubAdmin({ db, authPolicy, authCapabilities, officialAi: aiConfig, aiPoints, verifyPassword, shanghaiDay, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
   // Hub account connection and the official AI gateway (docs/HUB_CONNECT_AI.md).
   const connect = createConnect({ db, enabled: () => aiConfig.enabled(), identity, throttle, json, bodyJson, points: aiPoints, now: options.now });
   const officialAi = createOfficialAi({ db, config: aiConfig, connect, points: aiPoints, json, readBody, now: options.now, fetchImpl: options.officialAiFetch });
@@ -374,7 +405,13 @@ export async function createApp(options = {}) {
         res.writeHead(result.status, { 'Content-Type': result.type, 'Content-Length': result.bytes.length, 'Cache-Control': 'no-store' }); res.end(result.bytes); return;
       }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
-      if (pathname === '/api/config' && req.method === 'GET') { json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: emailCodes.ready || smsProvider.ready, registrationMethods: { email: !!emailCodes.ready, phone: !!smsProvider.ready }, invitationRequired: invitationPolicy.required(), turnstileSiteKey: emailCodes.siteKey || smsProvider.siteKey || '', cloudEnabled, practiceOrigin, adminEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' }, officialAi: { enabled: aiConfig.enabled(), protocolVersion: 1 } }); return; }
+      if (pathname === '/api/config' && req.method === 'GET') {
+        const policy = authPolicy.get(), methods = policy.registrationCodeRequired || policy.loginCodeRequired ? verificationMethods() : { email: true, phone: true };
+        const ready = (!policy.registrationCaptchaRequired || captchaProvider.ready) && (methods.email || methods.phone);
+        json(res, 200, { maxArchiveMB: archiveLimit / MB, registrationReady: !!ready, registrationMethods: ready ? methods : { email: false, phone: false },
+          verificationMethods: verificationMethods(), captchaReady: !!captchaProvider.ready, authPolicy: policy, invitationRequired: policy.invitationRequired,
+          turnstileSiteKey: captchaProvider.siteKey || '', cloudEnabled, practiceOrigin, adminEnabled, localImport: { enabled: localImportEnabled, protocolVersion: 1, scheme: 'quizforge' }, officialAi: { enabled: aiConfig.enabled(), protocolVersion: 1 } }); return;
+      }
       if (await connect.handle(req, res, url)) return;
       if (await officialAi.handle(req, res, url)) return;
       if (await handleAdmin(req, res, url)) return;
@@ -383,24 +420,28 @@ export async function createApp(options = {}) {
       if (pathname === '/api/auth/email-code' && req.method === 'POST') {
         throttle(req, 'email-code', 6);
         const input = await bodyJson(req);
+        const policy = authPolicy.get();
+        if (!policy.registrationCodeRequired) fail(400, '注册当前无需验证码，请直接提交注册');
         if (invitationPolicy.required()) invitations.check(input.invitationCode);
         const email = text(input.email, '邮箱', 180).toLowerCase();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(400, '邮箱格式不正确');
         const ip = process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
         const hostname = new URL(publicOrigin || `http://${req.headers.host}`).hostname;
-        await emailCodes.send(email, ip || '', input.captchaToken, hostname);
+        await emailCodes.send(email, ip || '', input.captchaToken, hostname, { captchaRequired: policy.registrationCaptchaRequired, verifyCaptcha: captchaProvider.verify });
         json(res, 200, { message: '如果该邮箱可以注册，验证码将发送到邮箱，请检查收件箱和垃圾邮件。', retryAfter: 60 }); return;
       }
       if (pathname === '/api/auth/phone-code' && req.method === 'POST') {
         throttle(req, 'phone-code', 6);
         const input = await bodyJson(req);
+        const policy = authPolicy.get();
+        if (!policy.registrationCodeRequired) fail(400, '注册当前无需验证码，请直接提交注册');
         if (invitationPolicy.required()) invitations.check(input.invitationCode);
-        if (!smsProvider.ready) fail(503, '手机验证暂未开放，请使用邮箱');
+        if (!verificationMethods().phone) fail(503, '手机验证暂未开放，请使用邮箱');
         const contact = loginContact(input);
         if (contact?.channel !== 'phone') fail(400, '请填写中国大陆手机号');
         const ip = process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
         const hostname = new URL(publicOrigin || `http://${req.headers.host}`).hostname;
-        await contactCodes.send(contact, 'register', ip || '', input.captchaToken, hostname, !accountByContact(db, contact));
+        await contactCodes.send(contact, 'register', ip || '', input.captchaToken, hostname, !accountByContact(db, contact), { captchaRequired: policy.registrationCaptchaRequired, verifyCaptcha: captchaProvider.verify });
         json(res, 200, { message: '如果该手机号可以注册，验证码将通过短信发送，请注意查收。', retryAfter: 60 }); return;
       }
       // Add a missing contact to this account; never replace or merge accounts.
@@ -414,7 +455,7 @@ export async function createApp(options = {}) {
         if (accountByContact(db, contact)) fail(409, '该联系方式无法绑定，请使用其他联系方式');
         if (pathname.endsWith('contact-code')) {
           const ip = process.env.TRUST_PROXY === '1' ? String(req.headers['x-real-ip'] || req.socket.remoteAddress) : req.socket.remoteAddress;
-          await contactCodes.send(contact, 'bind:' + user.id, ip || '', input.captchaToken, new URL(publicOrigin || `http://${req.headers.host}`).hostname);
+          await contactCodes.send(contact, 'bind:' + user.id, ip || '', input.captchaToken, new URL(publicOrigin || `http://${req.headers.host}`).hostname, true, { verifyCaptcha: captchaProvider.verify });
           json(res, 200, { message: '验证码已发送，请查收。', retryAfter: 60 });
         } else {
           try { contactCodes.consume(contact, 'bind:' + user.id, input.code, () => {
@@ -422,10 +463,21 @@ export async function createApp(options = {}) {
             if (accountByContact(db, contact)) fail(409, '该联系方式无法绑定，请使用其他联系方式');
             if (contact.channel === 'phone') db.prepare('INSERT INTO user_phones VALUES (?,?,?)').run(user.id, contact.value, Date.now());
             else db.prepare('UPDATE users SET email=? WHERE id=?').run(contact.value, user.id);
+            setContactVerified(db, user.id, contact, true);
           }); } catch (error) { if (error.message.includes('UNIQUE')) fail(409, '该联系方式无法绑定，请使用其他联系方式'); throw error; }
           json(res, 200, { user: accountProfile(db, user.id) });
         }
         return;
+      }
+      if (pathname === '/api/auth/login-code' && req.method === 'POST') {
+        throttle(req, 'login-code', 6); throttle(req, 'auth', 12);
+        const input = await bodyJson(req), contact = loginContact(input), policy = authPolicy.get();
+        if (!policy.loginCodeRequired) fail(400, '登录当前无需验证码，请直接登录');
+        if (!contact) fail(400, '请填写邮箱或中国大陆手机号');
+        const user = await authenticate(contact, input.password);
+        await contactCodes.send(contact, loginPurpose(user), requestIp(req) || '', input.captchaToken, hostname(req), true,
+          { captchaRequired: policy.loginCaptchaRequired, captchaAction: 'login_' + contact.channel, verifyCaptcha: captchaProvider.verify });
+        json(res, 200, { message: '验证码已发送，请查收。', retryAfter: 60 }); return;
       }
       if (['/api/auth/register', '/api/auth/login'].includes(pathname) && req.method === 'POST') {
         throttle(req, 'auth', 12);
@@ -437,31 +489,52 @@ export async function createApp(options = {}) {
         if (typeof password !== 'string' || password.length > 128) fail(400, '密码格式不正确');
         if (password.length < 10) fail(400, '密码至少需要 10 个字符');
         if (pathname.endsWith('register')) {
-          if (!(contact.channel === 'email' ? emailCodes.ready : smsProvider.ready)) fail(503, contact.channel === 'email' ? '注册邮件暂未开放，请稍后再来' : '手机验证暂未开放，请使用邮箱');
+          const policy = authPolicy.get();
+          if ((policy.registrationCodeRequired || policy.loginCodeRequired) && !verificationMethods()[contact.channel]) fail(503, contact.channel === 'email' ? '邮箱验证暂未开放，请稍后再来' : '手机验证暂未开放，请使用邮箱');
+          let captchaVerified = false;
+          if (policy.registrationCaptchaRequired && !policy.registrationCodeRequired) { await requireCaptcha(req, input, 'register_' + contact.channel); captchaVerified = true; }
           if (invitationPolicy.required()) invitations.check(input.invitationCode);
-          const name = text(input.name, '昵称', 30);
+          const name = text(input.name, '用户名', 30);
           const salt = randomBytes(16).toString('hex');
           const digest = (await derive(password, salt, 64)).toString('hex');
           const id = randomUUID();
-          const createUser = () => {
+          const createUser = proof => {
+            const current = authPolicy.get();
+            if (current.registrationCodeRequired && !proof.codeVerified || current.registrationCaptchaRequired && !proof.captchaVerified) fail(409, '注册设置已更新，请按最新要求完成验证');
             if (accountByContact(db, contact)) fail(409, '该联系方式已注册，请直接登录');
             db.prepare('INSERT INTO users (id,email,name,password,created) VALUES (?,?,?,?,?)').run(id, email, name, `${salt}:${digest}`, iso());
-            if (contact.channel === 'phone') db.prepare('INSERT INTO user_phones VALUES (?,?,?)').run(id, contact.value, Date.now());
+            if (contact.channel === 'phone') db.prepare('INSERT INTO user_phones VALUES (?,?,?)').run(id, contact.value, proof.codeVerified ? Date.now() : 0);
+            setContactVerified(db, id, contact, proof.codeVerified);
             // Re-read inside the final account transaction: an administrator
             // can enable the gate while password hashing is still in flight.
             if (invitationPolicy.required()) invitations.consume(input.invitationCode, id);
           };
           try {
-            if (contact.channel === 'email') emailCodes.consume(email, input.code, createUser);
-            else contactCodes.consume(contact, 'register', input.code, createUser);
+            if (policy.registrationCodeRequired) {
+              const complete = proof => createUser({ ...proof, codeVerified: true });
+              const checks = { captchaRequired: () => authPolicy.get().registrationCaptchaRequired };
+              if (contact.channel === 'email') emailCodes.consume(email, input.code, complete, checks);
+              else contactCodes.consume(contact, 'register', input.code, complete, checks);
+            } else {
+              db.exec('BEGIN IMMEDIATE');
+              try { createUser({ codeVerified: false, captchaVerified }); db.exec('COMMIT'); }
+              catch (error) { db.exec('ROLLBACK'); throw error; }
+            }
           } catch (e) { if (e.message.includes('UNIQUE')) fail(409, '该联系方式已注册，请直接登录'); throw e; }
           session(res, id); json(res, 201, { user: accountProfile(db, id) }); return;
         }
-        const user = accountByContact(db, contact);
-        const [salt, digest] = (user?.password || `${'0'.repeat(32)}:${'0'.repeat(128)}`).split(':');
-        const candidate = await derive(password, salt, 64);
-        const expected = Buffer.from(digest || '', 'hex');
-        if (!user || expected.length !== candidate.length || !timingSafeEqual(candidate, expected) || db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(user.id)) fail(401, '账号或密码不正确，或账号已停用');
+        const policy = authPolicy.get();
+        let captchaVerified = false;
+        if (policy.loginCaptchaRequired && !policy.loginCodeRequired) { await requireCaptcha(req, input, 'login_' + contact.channel); captchaVerified = true; }
+        const user = await authenticate(contact, password);
+        const finish = proof => {
+          const current = authPolicy.get(), latest = accountByContact(db, contact);
+          if (current.loginCodeRequired && !proof.codeVerified || current.loginCaptchaRequired && !proof.captchaVerified) fail(409, '登录设置已更新，请按最新要求完成验证');
+          if (!latest || latest.id !== user.id || latest.password !== user.password || db.prepare('SELECT 1 FROM user_blocks WHERE user_id=?').get(user.id)) fail(401, '账号或密码不正确，或账号已停用');
+          if (proof.codeVerified) setContactVerified(db, user.id, contact, true);
+        };
+        if (policy.loginCodeRequired) contactCodes.consume(contact, loginPurpose(user), input.code, proof => finish({ ...proof, codeVerified: true }), { captchaRequired: () => authPolicy.get().loginCaptchaRequired });
+        else finish({ codeVerified: false, captchaVerified });
         session(res, user.id); json(res, 200, { user: accountProfile(db, user.id) }); return;
       }
       if (pathname === '/api/auth/logout' && req.method === 'POST') {
@@ -614,7 +687,7 @@ export async function createApp(options = {}) {
   });
   server.requestTimeout = 45000; server.headersTimeout = 10000;
   server.on('close', () => { clearInterval(sweep); reviewNotifier.stop(); cloudLibrary?.close(); db.close(); });
-  return { server, dataDir, db, cloudLibrary, cloudAccounts, metrics, reviewPackages, aiConfig, aiPoints };
+  return { server, dataDir, db, cloudLibrary, cloudAccounts, metrics, reviewPackages, aiConfig, aiPoints, authPolicy };
 }
 
 if (import.meta.main) {

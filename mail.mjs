@@ -12,9 +12,11 @@ export function mailSettings(env = process.env) {
     pepper: env.EMAIL_CODE_PEPPER, siteKey: env.TURNSTILE_SITE_KEY, captchaSecret: env.TURNSTILE_SECRET_KEY,
     reviewTemplateId: Number(env.TENCENT_SES_REVIEW_TEMPLATE_ID),
   };
-  settings.ready = !!(settings.enabled && settings.secretId && settings.secretKey && settings.from &&
+  settings.deliveryReady = !!(settings.enabled && settings.secretId && settings.secretKey && settings.from &&
     ['ap-hongkong', 'ap-guangzhou'].includes(settings.region) && Number.isSafeInteger(settings.templateId) && settings.templateId > 0 &&
-    settings.pepper?.length >= 32 && productionKey(settings.siteKey) && productionKey(settings.captchaSecret));
+    settings.pepper?.length >= 32);
+  settings.captchaReady = !!(productionKey(settings.siteKey) && productionKey(settings.captchaSecret));
+  settings.ready = settings.deliveryReady && settings.captchaReady;
   settings.reviewReady = !!(settings.enabled && settings.secretId && settings.secretKey && settings.from &&
     ['ap-hongkong', 'ap-guangzhou'].includes(settings.region) && Number.isSafeInteger(settings.reviewTemplateId) && settings.reviewTemplateId > 0);
   return settings;
@@ -50,7 +52,7 @@ export function createMailProvider(settings, fetcher = fetch) {
     return result.MessageId;
   };
   return {
-    ready: settings.ready, pepper: settings.pepper, siteKey: settings.ready ? settings.siteKey : '',
+    ready: settings.ready, deliveryReady: settings.deliveryReady ?? settings.ready, captchaReady: settings.captchaReady ?? settings.ready, pepper: settings.pepper, siteKey: settings.siteKey || '',
     reviewReady: settings.reviewReady,
     async sendReviewAlert(email) {
       if (!settings.reviewReady) throw new Error('ReviewMailDisabled');
@@ -65,9 +67,10 @@ export function createMailProvider(settings, fetcher = fetch) {
       const result = await response.json();
       return response.ok && result.success === true && result.action === action && result.hostname === hostname;
     },
-    async send(email, code) {
-      if (!settings.ready) throw new Error('MailDisabled');
-      return deliver(signedEmailRequest(settings, email, code));
+    async send(email, code, nonce, { purpose } = {}) {
+      if (!(settings.deliveryReady ?? settings.ready)) throw new Error('MailDisabled');
+      const subject = purpose?.startsWith('login:') ? 'QuizForge 登录验证码' : purpose?.startsWith('bind:') ? 'QuizForge 绑定验证码' : 'QuizForge 注册验证码';
+      return deliver(signedTemplateRequest(settings, email, subject, settings.templateId, { code }));
     },
   };
 }
