@@ -543,7 +543,9 @@ export async function createApp(options = {}) {
         if (entry) {
           let data = await readFile(path.join(root, 'public', entry[0]));
           if (options.practiceHome && pathname === '/cloud/ai' && url.searchParams.get('embedded') === '1') {
-            data = Buffer.from(data.toString('utf8').replace('</head>', '<link rel="stylesheet" href="/cloud/embedded.css"></head>'));
+            // The custom-model frame inside Web's AI 评分 panel uses Web's own ai-settings.css.
+            const base = url.searchParams.get('base'), web = /^\/cloud\/practice\/[a-f0-9-]{36}$/.test(base || '') ? `<link rel="stylesheet" href="${base}/ai/ai-settings.css">` : '';
+            data = Buffer.from(data.toString('utf8').replace('<link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/cloud/cloud.css">', web).replace('</head>', '<link rel="stylesheet" href="/cloud/embedded.css"></head>'));
             res.setHeader('X-Frame-Options', 'SAMEORIGIN');
             res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' https:; frame-ancestors 'self'; base-uri 'none'; object-src 'none'; form-action 'self'");
           }

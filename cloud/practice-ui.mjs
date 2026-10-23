@@ -36,10 +36,14 @@ export function ordinaryPracticeAsset(file, source, base) {
   if (file === 'index.html') {
     source = replaceRequired(source, '<html lang="zh-CN">', '<html lang="zh-CN" data-qf-theme="image" style="--qf-dim:.15;--qf-clear:.7">');
     source = source.replace(/<nav class="settings-tabs"[\s\S]*?<\/nav>/, '<nav class="settings-tabs" role="tablist" aria-label="设置分类"><button id="settings-user-tab" role="tab" aria-selected="true" type="button">用户中心</button><button id="settings-ai-tab" role="tab" aria-selected="false" type="button">AI 评分</button><button id="settings-appearance-tab" role="tab" aria-selected="false" type="button">外观</button></nav>');
-    source = source.replace(/<form id="network-settings-form">[\s\S]*?<\/form>/, userPanel);
-    const start = source.indexOf('<section id="ai-settings-panel"'), end = source.indexOf('<section id="appearance-settings-panel"', start);
-    if (start < 0 || end < start) throw new Error('Pinned Web settings adapter changed');
-    source = source.slice(0, start) + '<section id="ai-settings-panel" hidden><iframe class="cloud-ai-frame" title="AI 评分设置" data-src="/cloud/ai?embedded=1"></iframe></section>\n    ' + source.slice(end);
+    // Web's own AI 评分 and 用户中心 panels stay as they are (docs/HUB_CONNECT_AI.md 7.3). The cloud has no
+    // local network settings, adds its storage/download cards in Web's card style, and keeps the custom
+    // model fields in a same-origin frame so the browser-local API Key never enters this page.
+    source = source.replace(/<form id="network-settings-form">[\s\S]*?<\/form>/, '');
+    source = replaceRequired(source, '<div class="user-center-actions">', quotaCards + '<div class="user-center-actions">');
+    const custom = /<div id="ai-settings-custom" class="ai-custom" hidden>[\s\S]*?<section id="ai-settings-report"[^>]*><\/section>\s*<\/div>/;
+    if (!custom.test(source)) throw new Error('Pinned Web AI settings adapter changed');
+    source = source.replace(custom, `<div id="ai-settings-custom" class="ai-custom" hidden><iframe class="cloud-ai-frame" title="自定义模型设置" data-src="/cloud/ai?embedded=1&amp;base=${encodeURIComponent(base)}"></iframe></div>`);
     source = source.replace('href="https://quizforge.treenewbee.cloud/#library"', 'href="https://quizforge.treenewbee.cloud/manage/#library"');
     source = source.replace(/<dialog id="access-dialog">[\s\S]*?<\/dialog>/, '');
     source = source.replace(/<dialog id="hub-login-dialog"[\s\S]*?<\/dialog>/, '');
@@ -48,4 +52,4 @@ export function ordinaryPracticeAsset(file, source, base) {
   return source;
 }
 
-const userPanel = `<section id="user-settings-panel"><p id="cloud-user-status" role="status">正在读取账户信息…</p><div id="cloud-user-details" hidden><div class="user-center-who"><span id="cloud-user-avatar" class="user-center-avatar" aria-hidden="true"></span><span><h3 id="cloud-user-name"></h3><p id="cloud-user-email"></p></span></div><div class="cloud-resource"><label for="cloud-redeem-code">免费 AI 额度</label><strong id="cloud-ai-points">—</strong><form id="cloud-redeem" class="cloud-redeem"><div><input id="cloud-redeem-code" maxlength="64" autocomplete="off" spellcheck="false" placeholder="兑换码 AI-XXXX-XXXX-XXXX-XXXX"><button id="cloud-redeem-submit" type="submit">兑换</button><button id="cloud-ai-refresh" type="button">刷新</button></div><small id="cloud-redeem-result" role="status"></small></form></div><div class="cloud-resource"><label for="cloud-storage-progress">存储空间</label><strong id="cloud-storage-value"></strong><progress id="cloud-storage-progress" max="1" value="0"></progress><small>包含题库、图片、已保存的作答和历史。</small></div><div class="cloud-resource"><label for="cloud-download-progress">今日下载流量</label><strong id="cloud-download-value"></strong><progress id="cloud-download-progress" max="1" value="0"></progress><small>仅题库文件下载和导出计入，每天北京时间 00:00 重置。正常刷题、读取图片和保存不消耗此额度。</small></div><div class="dialog-actions"><button id="cloud-user-logout" type="button">退出登录</button></div></div><a id="cloud-user-login" href="/auth/hub" hidden>重新登录 Hub</a></section>`;
+const quotaCards = `<div class="user-center-points cloud-quota"><small>存储空间</small><strong id="cloud-storage-value">—</strong><progress id="cloud-storage-progress" max="1" value="0" aria-label="存储空间用量"></progress><small>包含题库、图片、已保存的作答和历史。</small></div><div class="user-center-points cloud-quota"><small>今日下载流量</small><strong id="cloud-download-value">—</strong><progress id="cloud-download-progress" max="1" value="0" aria-label="今日下载用量"></progress><small>仅题库文件下载和导出计入，每天北京时间 00:00 重置。正常刷题、读取图片和保存不消耗此额度。</small></div>`;

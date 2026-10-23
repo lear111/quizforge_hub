@@ -1,18 +1,26 @@
-let frame, flags = 'off', account = '', sources = { official: false, custom: false }, sequence = 0;
+let frame, flags = 'off', account = '', sources = { official: false, custom: false }, prefs = {}, customReady = false, sequence = 0;
 // Free-quota errors that move on to the custom model, as on the Web host (ai-provider.js FALLBACK).
 const FALLBACK = new Set(['AI_OFFICIAL_LOGIN', 'AI_OFFICIAL_BALANCE', 'AI_OFFICIAL_BUDGET', 'AI_OFFICIAL_UNAVAILABLE', 'AI_UPSTREAM', 'AI_TIMEOUT', 'AI_NETWORK', 'AI_RATE_LIMIT']);
 const calls = new Map(), scheduled = new Set();
 let queue = Promise.resolve();
 export const cloudAiHeaders = () => ({ 'X-QuizForge-Cloud-Ai': flags });
+// The switch and sources come from Web's AI 评分 panel (experience.js); whether the custom model is
+// saved or unlocked comes from the custom-model frame, which keeps the Key.
+function recompute() {
+  const custom = !!prefs.useCustom && customReady, enabled = !!prefs.enabled && (!!prefs.useOfficial || custom);
+  flags = enabled ? prefs.autoGrade ? 'auto' : 'manual' : 'off'; sources = { official: !!prefs.useOfficial, custom };
+  document.dispatchEvent(new CustomEvent('qfh-ai-status', { detail: { enabled, customReady } }));
+}
+export function setCloudAiPrefs(value) { prefs = { ...value }; recompute(); }
 export function bindCloudAi(element) {
   frame = element;
   window.addEventListener('message', event => {
     if (event.origin !== location.origin || event.source !== frame.contentWindow) return;
     const value = event.data;
     if (value?.type === 'qfh-ai-status') {
-      account = value.account; flags = value.enabled ? value.autoGrade ? 'auto' : 'manual' : 'off'; sources = { official: value.official === true, custom: value.custom === true };
-      document.dispatchEvent(new CustomEvent('qfh-ai-status', { detail: { enabled: flags !== 'off' } }));
+      account = value.account; customReady = value.custom === true; recompute();
     }
+    if (value?.type === 'qfh-ai-height' && Number.isFinite(value.height)) frame.style.height = Math.min(Math.max(value.height, 40), 2000) + 'px';
     if (value?.type === 'qfh-ai-response') {
       const call = calls.get(value.id); if (!call) return; calls.delete(value.id); clearTimeout(call.timer);
       if (value.ok) call.resolve(value.result); else call.reject(Object.assign(new Error('浏览器评分未完成'), { code: value.code }));

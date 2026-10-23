@@ -20,11 +20,12 @@ const hubAi = {
   async call(req, name, body, timeoutMs = 10000) {
     const token = login.token(req);
     if (!token) return { status: 401, body: { error: { code: 'HUB_LOGIN_REQUIRED', message: '登录已失效，请重新登录 Hub' } } };
+    const started = Date.now(), log = (status, error) => { if (status !== 200 || Date.now() - started > 5000) console.error('Hub AI relay', name, status, (Date.now() - started) + 'ms', error || ''); };
     try {
       const response = await fetch('http://127.0.0.1:4318/internal/ai/' + name, { method: body === undefined ? 'GET' : 'POST', headers: { Cookie: 'qfh_session=' + token, Origin: hubOrigin, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
       let value = null; try { value = await response.json(); } catch { }
-      return { status: response.status, body: value };
-    } catch (error) { return { status: 0, timeout: error?.name === 'TimeoutError', body: null }; }
+      log(response.status); return { status: response.status, body: value };
+    } catch (error) { log(0, error?.name); return { status: 0, timeout: error?.name === 'TimeoutError', body: null }; }
   },
 };
 const app = await createApp({

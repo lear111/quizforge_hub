@@ -103,7 +103,10 @@ test('ordinary cloud home creates the basic bank once per user, keeps private st
   const library = await (await request('/api/cloud/library')).json(); assert.equal(library.items.length, 1);
   const item = library.items[0], pageUrl = a.headers.get('location');
   const html = await (await request(pageUrl)).text(); assert.match(html, /用户中心/); assert.doesNotMatch(html, />网络连接<|>拓展管理<|hub-practice-nav|network-settings-form/);
-  assert.match(html, /href="\/cloud\/experience.css"/); assert.match(html, /data-src="\/cloud\/ai\?embedded=1"/); assert.match(html, /href="\/auth\/hub"/);
+  assert.match(html, /href="\/cloud\/experience.css"/); assert.match(html, /data-src="\/cloud\/ai\?embedded=1&amp;base=%2Fcloud%2Fpractice%2F[a-f0-9-]{36}"/);
+  // Web's own 用户中心 and AI 评分 markup, with the cloud storage cards; no device login dialog or page-held API Key field.
+  for (const id of ['user-center-panel', 'user-center-redeem', 'ai-settings-enabled', 'ai-settings-useOfficial', 'ai-settings-points', 'cloud-storage-progress']) assert.match(html, new RegExp(`id="${id}"`));
+  assert.doesNotMatch(html, /hub-login-dialog|ai-settings-apiKey/);
   assert.match(html, /--qf-dim:.15;--qf-clear:.7/);
   assert.equal((await request(pageUrl, 'bob')).status, 404);
   assert.equal((await request(pageUrl, '')).headers.get('location'), '/auth/hub');
@@ -114,7 +117,9 @@ test('ordinary cloud home creates the basic bank once per user, keeps private st
   const appearance = await (await request(pageUrl + 'shell/appearance.js')).text(); assert.match(appearance, /DEFAULT_DIM=15/); assert.match(appearance, /green:0,image:70/);
   const themes = await (await request(pageUrl + 'shell/themes.css')).text(); assert.match(themes, new RegExp(pageUrl + 'assets/backgrounds/dawn-lake.svg'));
   assert.equal((await request(pageUrl + 'assets/backgrounds/dawn-lake.svg')).status, 200);
-  const embedded = await request('/cloud/ai?embedded=1'); assert.equal(embedded.headers.get('x-frame-options'), 'SAMEORIGIN'); assert.match(embedded.headers.get('content-security-policy'), /frame-ancestors 'self'/);
+  const embedded = await request('/cloud/ai?embedded=1&base=' + encodeURIComponent('/cloud/practice/' + item.id)); assert.equal(embedded.headers.get('x-frame-options'), 'SAMEORIGIN'); assert.match(embedded.headers.get('content-security-policy'), /frame-ancestors 'self'/);
+  assert.match(await embedded.text(), new RegExp(`href="/cloud/practice/${item.id}/ai/ai-settings.css"`));
+  assert.doesNotMatch(await (await request('/cloud/ai?embedded=1&base=' + encodeURIComponent('//evil.example'))).text(), /evil/);
   const apiBase = '/api/cloud/practice/' + item.id, question = apiBase + '/api/collections/bank/' + item.banks[0].id + '/questions/single-sample-text';
   const state = await (await request(question)).json();
   const correct = JSON.parse(fs.readFileSync(path.join(snapshot, 'basic-content/question-banks/基础题型/基础题型展示/bank.json'), 'utf8')).questions[0].data.correctOptionId;

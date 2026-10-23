@@ -40,8 +40,8 @@ function prefs() {
 }
 function notifyAiStatus() {
   if (!embedded || window.parent === window) return;
-  const value = user ? prefs() : {}, custom = !!(value.useCustom && session(user.id));
-  window.parent.postMessage({ type: 'qfh-ai-status', account: user?.id ?? '', enabled: !!value.enabled && (value.useOfficial || custom), autoGrade: !!value.autoGrade, official: !!value.useOfficial, custom }, location.origin);
+  // The switch and sources live in Web's AI 评分 panel; this frame only says whether the custom model is ready.
+  window.parent.postMessage({ type: 'qfh-ai-status', account: user?.id ?? '', custom: !!(user && session(user.id)) }, location.origin);
 }
 const yuan = amount => '¥' + (Math.floor(Number(amount || 0) / 100) / 100).toFixed(2);
 let generating = false;
@@ -206,6 +206,75 @@ function aiPage() {
   form.addEventListener('click', event => { const action = event.target.closest('[data-ai-action]'); if (action) perform(action.dataset.aiAction); });
 }
 
+// Custom model fields inside Web's AI 评分 panel (practice-ui.mjs), in Web's markup and ai-settings.css.
+// The API Key stays in this frame: in memory, or encrypted with a local passphrase in this browser.
+function customPage() {
+  let stored = null, initialError = '';
+  try { stored = saved(); } catch { initialError = '无法读取本地配置，可清除后重新填写。'; }
+  const current = session(user.id), profile = current || stored || { baseUrl: '', model: '' };
+  let testReport = profile.testReport ?? null;
+  app.innerHTML = `<form id="ai-form" class="ai-settings-form" autocomplete="off"><div class="cloud-custom-body">
+    <label>服务地址<input name="baseUrl" type="url" maxlength="2048" required placeholder="https://服务地址/v1" value="${esc(profile.baseUrl)}"><small>填写 OpenAI 兼容接口的基础地址，系统会追加 /chat/completions。</small></label>
+    <label>模型名称<input name="model" maxlength="200" required placeholder="填写服务提供的模型 ID" value="${esc(profile.model)}"></label>
+    <label>API Key<input name="apiKey" type="password" maxlength="4096" autocomplete="new-password" placeholder="${current ? '已在当前页面配置，留空保留' : stored ? '可输入新值，或用口令解锁' : '输入 API Key'}"><small>API Key 只保存在这个浏览器中，不上传 Hub。</small></label>
+    <label class="ai-check"><input name="remember" type="checkbox" ${stored ? 'checked' : ''}>记住此设备（用本地口令加密保存）</label>
+    <label>本地解锁口令<input name="passphrase" type="password" maxlength="1024" autocomplete="new-password"><small>至少 8 个字符，不上传 Hub，请勿填写 Hub 登录密码；遗忘后无法恢复。</small></label>
+    <input name="vision" type="checkbox" hidden ${profile.vision ? 'checked' : ''}>
+    <p>评分内容会从浏览器直接发送到所配置的模型服务（服务需允许跨域访问），结果通过校验后自动保存。测试模型可检测图片识别能力并显示报告。</p>
+    <div class="ai-custom-actions"><button type="button" data-ai-action="test">测试模型</button>${stored && !current ? '<button type="button" data-ai-action="unlock">解锁</button>' : ''}<button type="button" data-ai-action="clear">清除</button><button class="primary" type="submit">保存</button></div>
+    <small id="ai-status" class="cloud-custom-status" role="status">${current ? '自定义模型已在当前页面可用。' : stored ? '此设备已有加密配置，输入口令后点“解锁”。' : '尚未配置自定义模型。'}</small>
+    <p class="form-error" role="alert">${esc(initialError)}</p>
+    <section class="ai-test-report" aria-live="polite" hidden></section>
+  </div></form>`;
+  const form = app.querySelector('#ai-form'), report = form.querySelector('.ai-test-report');
+  const showReport = () => {
+    report.hidden = !testReport; if (!testReport) return;
+    report.innerHTML = '<h3>模型测试报告</h3><ul>' + testReport.checks.map(check => `<li><span class="ai-report-label">${esc(check.label)}</span><span class="ai-report-badge ${check.ok ? 'passed' : 'failed'}">${check.ok ? '通过' : '未通过'}</span></li>`).join('') + '</ul>';
+  };
+  const resize = () => window.parent.postMessage({ type: 'qfh-ai-height', height: Math.ceil(document.body.getBoundingClientRect().height) }, location.origin);
+  new ResizeObserver(resize).observe(document.body); showReport(); resize();
+  form.addEventListener('input', event => { if (['baseUrl', 'model', 'apiKey'].includes(event.target.name)) { testReport = null; form.elements.vision.checked = false; showReport(); } });
+  async function perform(action) {
+    const data = Object.fromEntries(new FormData(form)), error = form.querySelector('.form-error'), status = form.querySelector('#ai-status');
+    data.enabled = true; data.autoGrade = false; data.vision = form.elements.vision.checked; data.remember = form.elements.remember.checked;
+    const started = epoch, account = user?.id, buttons = [...form.querySelectorAll('button')];
+    error.textContent = ''; status.textContent = '正在处理…'; buttons.forEach(button => { button.disabled = true; });
+    try {
+      if (action === 'clear') { forgetSession(); testReport = null; localStorage.removeItem(keyName()); customPage(); return; }
+      if (!crypto.subtle) throw new Error('请通过 HTTPS 打开页面');
+      if (action === 'unlock') {
+        const value = saved(); if (!value) throw new Error('此设备尚无加密配置');
+        const apiKey = await decryptKey(value.envelope, data.passphrase, bound(value.baseUrl));
+        if (epoch !== started || user?.id !== account) return;
+        setSession(user.id, { ...value, apiKey, enabled: true }); notifyAiStatus(); customPage(); return;
+      }
+      const previous = session(user.id), normalizedUrl = new URL(data.baseUrl).href.replace(/\/$/, '');
+      const value = connection({ ...data, outputMode: previous?.outputMode || stored?.outputMode || 'json', testReport, apiKey: data.apiKey || (previous?.baseUrl === normalizedUrl ? previous.apiKey : '') });
+      if (action === 'test') {
+        const canvas = document.createElement('canvas'); canvas.width = 290; canvas.height = 76;
+        const expected = [...crypto.getRandomValues(new Uint8Array(6))].map(item => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[item % 32]).join('');
+        const context = canvas.getContext('2d'); context.fillStyle = '#fff'; context.fillRect(0, 0, 290, 76); context.fillStyle = '#111'; context.font = 'bold 42px monospace'; context.fillText(expected, 20, 54);
+        const tested = await testGradingModel(value, { expected, dataUrl: canvas.toDataURL('image/png') });
+        if (epoch === started && user?.id === account) { testReport = tested.report; form.elements.vision.checked = tested.vision; showReport(); status.textContent = '模型测试已完成，点“保存”使结果生效。'; }
+        return;
+      }
+      let envelope;
+      if (data.remember) envelope = await encryptKey(value.apiKey, data.passphrase, bound(value.baseUrl));
+      if (epoch !== started || user?.id !== account) return;
+      // Neither plaintext nor the passphrase appears in localStorage, URLs, Hub requests or global objects.
+      if (envelope) { const { apiKey: _secret, ...settings } = value; localStorage.setItem(keyName(), JSON.stringify({ version: 1, ...settings, envelope })); }
+      else localStorage.removeItem(keyName());
+      setSession(user.id, value); notifyAiStatus(); form.elements.apiKey.value = ''; form.elements.passphrase.value = '';
+      status.textContent = envelope ? '已加密保存到此浏览器，当前页面可用。' : '仅在当前页面使用，关闭页面后需要重新填写。';
+    } catch (failure) {
+      // Never render native URL/parser/provider exceptions, which may contain user-entered credentials.
+      if (epoch === started && user?.id === account) { error.textContent = failure instanceof TypeError || failure instanceof SyntaxError ? '配置无效或浏览器存储不可用，请检查输入' : failure.message; status.textContent = ''; }
+    } finally { buttons.forEach(button => { button.disabled = false; }); resize(); }
+  }
+  form.addEventListener('submit', event => { event.preventDefault(); perform('save'); });
+  form.addEventListener('click', event => { const action = event.target.closest('[data-ai-action]'); if (action) perform(action.dataset.aiAction); });
+}
+
 function limitInputs(values, inherited = false) {
   return '<div class="cloud-limits">' + Object.entries(labels).map(([key, label]) => `<label>${label}（MiB）<input type="number" name="${key}" min="0" step="0.000001" ${inherited ? '' : 'required'} value="${values[key] === null ? '' : values[key] / MiB}"><small>${inherited ? '留空使用站点默认额度' : '0 表示没有可用额度'}</small></label>`).join('') + '</div>';
 }
@@ -287,7 +356,7 @@ try {
   if (!user) signedOut();
   else {
     document.querySelector('#cloud-account').textContent = user.name;
-    if (location.pathname === '/cloud/ai') { aiPage(); notifyAiStatus(); }
+    if (location.pathname === '/cloud/ai') { if (embedded) customPage(); else aiPage(); notifyAiStatus(); }
     else if (location.pathname === '/cloud/admin') await admin();
     else await home();
   }
