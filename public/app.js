@@ -155,7 +155,7 @@ function account() {
     const link = document.createElement('a'); link.className = 'text-button'; link.href = '/cloud/'; link.textContent = '云端空间'; $('#account').prepend(link);
   }
   if (practiceOrigin) {
-    const link = document.createElement('a'); link.className = 'button secondary practice-entry'; link.href = practiceOrigin + '/'; link.textContent = '进入练习'; $('#account').prepend(link);
+    const link = document.createElement('a'); link.className = 'button practice-entry'; link.href = practiceOrigin + '/'; link.textContent = '练习空间'; $('#account').prepend(link);
   }
 }
 function cloudDownloadButton() {
