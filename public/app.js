@@ -25,7 +25,8 @@ let reviewFilter = 'pending';
 let currentPack = null, upload = null, previewUrls = [];
 let registrationReady = false, registrationMethods = { email: false, phone: false }, captchaSiteKey = '', captchaWidget = null, captchaToken = '', captchaLoader, codeTimer, captchaEpoch = 0, captchaAction = '';
 const codeCooldowns = new Map();
-const contactChannel = value => /^[+\d]/.test(value.trim()) && !value.includes('@') ? 'phone' : 'email';
+const contactChannel = value => !value.trim() && isBinding() ? (user?.email ? 'phone' : 'email')
+  : /^[+\d]/.test(value.trim()) && !value.includes('@') ? 'phone' : 'email';
 const contactReady = () => !!registrationMethods[contactChannel($('#auth-email')?.value || '')];
 const isBinding = () => $('#auth-form')?.dataset.mode === 'bind';
 function clearCaptcha() {
