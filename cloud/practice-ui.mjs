@@ -6,8 +6,14 @@ const replaceRequired = (source, find, value) => {
 export function ordinaryPracticeAsset(file, source, base) {
   if (file === 'shell/appearance.js') {
     source = replaceRequired(source, 'DEFAULT_DIM=30', 'DEFAULT_DIM=15');
-    if (!/green:0,image:\d+/.test(source)) throw new Error('Pinned Web appearance defaults changed');
-    source = source.replace(/green:0,image:\d+/, 'green:0,image:70');
+    source = replaceRequired(source, 'green:0,coast:65,image:65', 'green:0,coast:65,image:70');
+    // Keep the established image default while a coast preference without a saved mask uses Web's 30%.
+    source = replaceRequired(source, '?saved.dim:DEFAULT_DIM', "?saved.dim:theme==='coast'?30:DEFAULT_DIM");
+    source = replaceRequired(source, 'let value=readAppearance(storage),imageUrl=null,busy=false,destroyed=false;', `let value=readAppearance(storage),imageUrl=null,busy=false,destroyed=false;
+  let untouchedMask=true;
+  try { const saved=JSON.parse(storage?.getItem('quizforge-appearance')||'{}'); untouchedMask=!validStep(saved?.dim,MAX_DIM); } catch {}`);
+    source = replaceRequired(source, 'value={...value,theme:id};save();apply();render();', "value={...value,theme:id,...(untouchedMask?{dim:id==='coast'?30:DEFAULT_DIM}:{})};save();apply();render();");
+    source = replaceRequired(source, "listen(dim,'input',()=>{const next=Number(dim.value);", "listen(dim,'input',()=>{untouchedMask=false;const next=Number(dim.value);");
     if (source.includes("?saved.theme:'default'")) source = source.replace("?saved.theme:'default'", "?saved.theme:'image'");
     else if (!source.includes("?saved.theme:'image'")) throw new Error('Pinned Web appearance theme changed');
   }

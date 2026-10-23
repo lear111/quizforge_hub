@@ -11,8 +11,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { CloudAccounts } from '../cloud/accounts.mjs';
 import { CloudLibrary, treeBytes } from '../cloud/library.mjs';
 
-const snapshot = process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-20261022', import.meta.url));
-const oldSnapshot = fileURLToPath(new URL('../.runtime/web-current', import.meta.url));
+const snapshot = process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-20261023-coast-verified', import.meta.url));
+const oldSnapshot = process.env.QFH_TEST_OLD_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url));
 const alice = '11111111-1111-4111-8111-111111111111', bob = '22222222-2222-4222-8222-222222222222';
 const enabled = fs.existsSync(snapshot) && JSON.parse(fs.readFileSync(path.join(snapshot, 'snapshot.json'))).builtins.some(row => row.extensionId === 'quizforge.short-answer-area');
 async function fixture(t, options = {}) {
@@ -150,11 +150,65 @@ test('legacy cloud roots merge without regenerating bank IDs, answers or frozen 
   assert.equal((await f.library.ensureDemo(alice)).banks.length, 2);
 });
 
+test('default basics include all five reviewed providers, images, submit/retry and frozen history', { skip: !enabled }, async t => {
+  const f = await fixture(t), item = await f.library.ensureDemo(alice), base = '/api/collections/bank/' + item.banks[0].id;
+  const collection = await f.api(item, base); assert.equal(collection.questions.length, 11);
+  assert.deepEqual(Object.fromEntries(item.extensions.map(row => [row.extensionId, row.version])), {
+    'quizforge.single-choice': '2.0.2', 'quizforge.multiple-choice': '2.0.2', 'quizforge.true-false': '2.0.2', 'quizforge.short-answer': '2.0.3', 'quizforge.short-answer-area': '1.0.5',
+  });
+  const current = new Map();
+  for (const row of collection.questions) { const state = await f.api(item, base + '/questions/' + row.id); assert.equal(state.question.id, row.id); current.set(row.id, state); }
+  const imageId = '97c5b39b51b8d7f75c85e010672604060eb3c820c5d17e6bd87a68d5c6601afe';
+  const image = await f.raw(item, '/api/resources/' + imageId); assert.equal(image.status, 200); assert.equal(image.type, 'image/png');
+  const { createHash } = await import('node:crypto'); assert.equal(createHash('sha256').update(image.bytes).digest('hex'), imageId);
+  const raw = JSON.parse(fs.readFileSync(path.join(snapshot, 'basic-content/question-banks/基础题型/基础题型展示/bank.json')));
+  const doc = text => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
+  const cases = [
+    ['single-sample-text', { selectedOptionId: raw.questions[0].data.correctOptionId }],
+    ['multiple-sample-numbers', { selectedOptionIds: raw.questions.find(q => q.id === 'multiple-sample-numbers').data.correctOptionIds }],
+    ['true-false-sample-true', { value: true }],
+    ['short-sample-text', { responses: { cache: doc('缓存保存常用数据，减少重复读取。') } }],
+    ['answer-area-information-flow', { responses: { answer: { type: 'qf-answer-area', formatVersion: 1, id: 'response-answer', width: 760, height: 700, text: '输入光线，处理信号，输出照片。', strokes: [] } } }],
+  ];
+  for (const [id, answer] of cases) {
+    const question = base + '/questions/' + id;
+    const act = async (action, data) => { const state = current.get(id), next = await f.api(item, question + '/actions', { requestId: randomUUID(), revision: state.state.revision, contentVersion: state.stamp.contentVersion, action, data }); current.set(id, next); return next; };
+    assert.equal((await act('draft', { answer })).state.status, 'draft', id);
+    assert.equal((await act('submit', { answer })).state.status, 'submitted', id);
+    assert.notEqual((await act('retry', {})).state.status, 'submitted', id);
+    const submitted = await act('submit', { answer }); assert.equal(submitted.state.status, 'submitted', id);
+    if (submitted.state.result.gradingStatus === 'pending') for (const part of raw.questions.find(q => q.id === id).data.parts) await act('review', { review: { targetId: part.id, score: 1 } });
+  }
+  const summary = await f.api(item, base + '/summary'), finished = await f.api(item, base + '/finish', { requestId: randomUUID(), roundId: summary.roundId, summaryVersion: summary.summaryVersion });
+  assert.equal(finished.finished, true); assert.equal(typeof finished.historyId, 'string');
+  const frozen = await f.api(item, base + '/history/' + finished.historyId);
+  await f.action(item, base + '/questions/single-sample-text', 'retry', {});
+  assert.deepEqual(await f.api(item, base + '/history/' + finished.historyId), frozen);
+});
+
+test('runtime upgrade preserves an existing customized demo, saved answers and frozen history without reimporting', { skip: !enabled || !fs.existsSync(oldSnapshot) }, async t => {
+  const f = await fixture(t, { snapshot: oldSnapshot }), item = await f.library.ensureDemo(alice), base = '/api/collections/bank/' + item.banks[0].id, q = base + '/questions/single-sample-text';
+  const bankFile = path.join(f.library.location(alice, item.id), 'question-banks', item.banks[0].path, 'bank.json'), bank = JSON.parse(fs.readFileSync(bankFile));
+  const answer = { selectedOptionId: bank.questions[0].data.correctOptionId };
+  await f.action(item, q, 'submit', { answer });
+  const summary = await f.api(item, base + '/summary'), finished = await f.api(item, base + '/finish', { requestId: randomUUID(), roundId: summary.roundId, summaryVersion: summary.summaryVersion });
+  bank.title = '用户自行修改的基础展示'; fs.writeFileSync(bankFile, JSON.stringify(bank));
+  const bytes = fs.readFileSync(bankFile), saved = await f.api(item, q), history = await f.api(item, base + '/history/' + finished.historyId);
+  const oldExtensions = structuredClone(item.extensions);
+  await f.library.close(); f.library = await CloudLibrary.create(f.db, f.accounts, f.directory, snapshot, { unifiedWorkspace: true });
+  const upgraded = await f.library.ensureDemo(alice);
+  assert.equal(upgraded.id, item.id); assert.equal(upgraded.banks.length, 1); assert.deepEqual(upgraded.extensions, oldExtensions);
+  assert.deepEqual(fs.readFileSync(bankFile), bytes); assert.deepEqual((await f.api(upgraded, q)).state, saved.state);
+  assert.deepEqual(await f.api(upgraded, base + '/history/' + finished.historyId), history);
+  assert.equal((await f.library.ensureDemo(alice)).banks.length, 1); assert.equal(f.library.list(alice).length, 1);
+  const fresh = await f.library.ensureDemo(bob); assert.equal(fresh.extensions.find(row => row.extensionId === 'quizforge.short-answer-area').version, '1.0.5');
+});
+
 test('workspace module graph and controls follow pinned Web, with only cloud settings and transport adapters', { skip: !enabled }, async t => {
   const f = await fixture(t), lib = f.library, item = await lib.ensureDemo(alice), base = '/cloud/practice/' + item.id + '/';
   const asset = name => lib.practice.asset(alice, item.id, name, { ordinary: true }).bytes.toString();
   const html = asset('index.html'), upstream = fs.readFileSync(path.join(snapshot, 'core/web/index.html'), 'utf8');
-  const lock = JSON.parse(fs.readFileSync(new URL('../deploy/web-workspace-20261022.json', import.meta.url))), inventory = new Map(lib.runtime.manifest.inventory.map(row => [row.path, row.sha256]));
+  const lock = JSON.parse(fs.readFileSync(new URL('../deploy/web-workspace-20261023.json', import.meta.url))), inventory = new Map(lib.runtime.manifest.inventory.map(row => [row.path, row.sha256]));
   for (const row of lock.inventory) assert.equal(inventory.get(row.path), row.sha256, row.path);
   for (const id of ['library-import', 'library-import-dialog', 'library-import-file', 'library-manage-dialog']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1);

@@ -120,7 +120,7 @@ test('ordinary cloud home creates the basic bank once per user, keeps private st
   const manifest = await (await request(pageUrl + 'manifest.webmanifest')).json(); assert.match(manifest.description, /云端/);
   for (const icon of manifest.icons) assert.equal((await request(icon.src)).status, 200);
   const adapted = await (await request(pageUrl + 'app.js')).text(); assert.match(adapted, /bindCloudExperience/); assert.doesNotMatch(adapted, /bindNetworkSettings\(|bindDevelopmentSettings\(|bindAiSettings\(/);
-  const appearance = await (await request(pageUrl + 'shell/appearance.js')).text(); assert.match(appearance, /DEFAULT_DIM=15/); assert.match(appearance, /green:0,image:70/);
+  const appearance = await (await request(pageUrl + 'shell/appearance.js')).text(); assert.match(appearance, /DEFAULT_DIM=15/); assert.match(appearance, /green:0,coast:65,image:70/);
   const themes = await (await request(pageUrl + 'shell/themes.css')).text(); assert.match(themes, new RegExp(pageUrl + 'assets/backgrounds/dawn-lake.svg'));
   assert.equal((await request(pageUrl + 'assets/backgrounds/dawn-lake.svg')).status, 200);
   const embedded = await request('/cloud/ai?embedded=1&base=' + encodeURIComponent('/cloud/practice/' + item.id)); assert.equal(embedded.headers.get('x-frame-options'), 'SAMEORIGIN'); assert.match(embedded.headers.get('content-security-policy'), /frame-ancestors 'self'/);
