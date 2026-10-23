@@ -34,7 +34,7 @@ aiToggle.addEventListener('click', () => setAiNav(aiItems.hidden));
 function navigate(page) { state.job = null; state.reviewPack = null; state.action = null; location.hash = page; if (state.page === page) render(); }
 function errorView(error) { main.innerHTML = heading('暂时无法打开', esc(error.message), button('retry', '重试')); if (error.status === 401 || error.status === 403) main.insertAdjacentHTML('beforeend', '<a class="qa-btn" href="/manage/#admin">重新登录管理员账号</a>'); }
 async function render() {
-  const stamp = ++epoch, hash = location.hash.slice(1) === 'official-ai' ? 'ai-keys' : location.hash.slice(1); state.page = ['overview', 'authentication', 'invitations', 'users', 'banks', 'private', 'trust', 'ai-keys', 'ai-codes', 'audit'].includes(hash) ? hash : 'overview';
+  const stamp = ++epoch, hash = location.hash.slice(1) === 'official-ai' ? 'ai-keys' : location.hash.slice(1); state.page = ['overview', 'authentication', 'contact', 'invitations', 'users', 'banks', 'private', 'trust', 'ai-keys', 'ai-codes', 'audit'].includes(hash) ? hash : 'overview';
   if (!state.page.startsWith('ai-')) aiPages.leave(); else if (aiItems.hidden) setAiNav(true);
   aiToggle.classList.toggle('qa-nav-active', state.page.startsWith('ai-'));
   for (const nav of root.querySelectorAll('[data-page]')) { if (nav.dataset.page === state.page) nav.setAttribute('aria-current', 'page'); else nav.removeAttribute('aria-current'); }
@@ -43,6 +43,7 @@ async function render() {
     let html;
     if (state.page === 'overview') { const value = await api('/overview?days=' + state.days); if (stamp !== epoch) return; html = overview(value); }
     else if (state.page === 'authentication') { state.authentication = await api('/authentication'); html = authentication(state.authentication); }
+    else if (state.page === 'contact') { state.contact = await api('/contact'); html = contactSettings(state.contact); }
     else if (state.page === 'invitations') { const value = await api('/invitations'); state.invites = value.items; state.invitationRequired = value.invitationRequired; html = invitations(); }
     else if (state.page === 'users') { const value = await api('/users?' + new URLSearchParams({ page: state.userPage, q: state.userQuery })); state.users = value.users; state.defaults = value.defaults; html = users(value); }
     else if (state.page === 'banks') { const value = await api('/packs?' + new URLSearchParams({ status: state.bankStatus, page: state.bankPage })); state.packs = value.items; html = banks(value); }
@@ -70,6 +71,10 @@ function drawChart() {
   for (const i of [0, Math.floor((trend.length - 1) / 2), trend.length - 1]) svg += `<text x="${x(i)}" y="${h-10}" text-anchor="${i === 0 ? 'start' : i === trend.length - 1 ? 'end' : 'middle'}" fill="var(--qfa-muted)" font-size="11">${esc(trend[i].day.slice(5))}</text>`;
   for (const [key, color, label] of [['active', '--qfa-purple', '活跃用户'], ['practice', '--qfa-green', '练习用户'], ['registered', '--qfa-orange', '新增用户']]) { svg += `<path d="${trend.map((d,i)=>(i?'L':'M')+x(i)+','+y(d[key])).join(' ')}" stroke="var(${color})" stroke-width="2" fill="none"/>`; for (let i = 0; i < trend.length; i++) svg += `<circle cx="${x(i)}" cy="${y(trend[i][key])}" r="3" fill="var(${color})"><title>${trend[i].day} ${label} ${trend[i][key]} 人</title></circle>`; }
   node.innerHTML = svg + '</svg>';
+}
+function contactSettings(value) {
+  return heading('管理员联系方式', '用户点击联系入口后展示此内容，Hub 首页和练习空间共用', button('reload-authentication', '重新读取'))
+    + `<form data-form="contact" class="qa-panel"><label class="qa-contact-label" for="admin-contact-content">弹窗内容</label><p class="qa-muted">支持多行纯文本，最多 4000 字。可填写 QQ、邮箱、群号、联系时间和注意事项。保存后会向用户展示，请只填写愿意公开的信息。</p><textarea id="admin-contact-content" name="content" class="qa-contact-input" rows="10" maxlength="4000" placeholder="在这里填写管理员联系方式及联系说明…">${esc(value.content)}</textarea><h2>内容预览</h2><pre class="qa-contact-preview" data-contact-preview>${esc(value.content || '管理员尚未填写联系方式。')}</pre><p class="qa-contact-feedback" role="status">当前为已保存内容。编辑后请点击“保存并生效”。</p><p class="qa-error" role="alert"></p><button class="qa-btn primary" type="submit">保存并生效</button></form>`;
 }
 function authentication({ policy, capabilities }) {
   const option = (name, label, help) => `<label class="qa-auth-option"><input type="checkbox" role="switch" name="${name}" ${policy[name] ? 'checked' : ''}><span><strong>${label}</strong><small>${help}</small></span></label>`;
@@ -140,11 +145,17 @@ root.addEventListener('change',async event=>{
   if(event.target.id==='bank-status'){state.bankStatus=event.target.value;state.bankPage=1;await render();}
   if(event.target.id==='review-file'&&event.target.value){const value=JSON.parse(event.target.value),code=main.querySelector('#review-code');code.textContent='正在读取原文件…';try{const file=await api('/cloud/submissions/'+state.job.id+'/file?'+new URLSearchParams(value));code.textContent=file.binary?`二进制资源：${file.path}\n${size(file.size)}\nSHA-256: ${file.sha256}`:(file.truncated?'文件较大，以下仅显示前 512 KiB；请下载所选原文件完整检查后再批准。\n\n':'')+file.text;}catch(error){code.textContent=error.message;}}
 });
+root.addEventListener('input',event=>{
+  if(event.target.id!=='admin-contact-content')return;
+  main.querySelector('[data-contact-preview]').textContent=event.target.value.trim()||'管理员尚未填写联系方式。';
+  main.querySelector('.qa-contact-feedback').textContent='有未保存的更改，请点击“保存并生效”。';
+});
 root.addEventListener('submit',async event=>{
   const form=event.target;if(!form.matches('form[data-form]'))return;event.preventDefault();if(!form.reportValidity())return;
   if(busy)return;const data=new FormData(form),kind=form.dataset.form,submitter=event.submitter||form.querySelector('[type=submit]');busy=kind!=='search-users';submitter.disabled=true;const originalLabel=submitter.textContent;submitter.textContent='正在处理…';toast('正在处理，请等待结果…');
   try{
     if(kind==='search-users'){state.userQuery=String(data.get('q')||'').trim();state.userPage=1;await render();return;}
+    if(kind==='contact'){await api('/contact',{method:'PUT',body:{content:data.get('content'),revision:state.contact.revision}});await render();main.querySelector('.qa-contact-feedback').textContent='已保存并立即生效。';toast('管理员联系方式已保存，用户下次打开弹窗即可看到新内容。');return;}
     if(kind==='authentication'){const names=['loginCodeRequired','loginCaptchaRequired','registrationCodeRequired','registrationCaptchaRequired','invitationRequired'];await api('/authentication',{method:'PUT',body:{...Object.fromEntries(names.map(name=>[name,data.has(name)])),revision:state.authentication.policy.revision}});await render();main.querySelector('.qa-auth-feedback').textContent='已保存并立即生效。';toast('登录与注册设置已保存并立即生效。');return;}
     if(kind==='invitation-policy'){const value=await api('/invitations/settings',{method:'PUT',body:{invitationRequired:data.has('invitationRequired')}});await render();toast(value.invitationRequired?'已开启邀请码验证，立即对新注册生效。':'已关闭邀请码验证，注册仍需完成邮箱或手机验证及人机验证。');return;}
     if(kind==='invitations'){state.newCodes=(await api('/invitations',{body:{count:Number(data.get('count')),days:Number(data.get('days'))}})).items;await render();toast('邀请码已生成，完整码仅在本次页面中保留，请及时保存。');return;}

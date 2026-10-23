@@ -4,13 +4,14 @@ import { pipeline } from 'node:stream/promises';
 import { filename } from '../admin/common.mjs';
 import { hubAccount, hubRedeem, hubComplete } from './hub-ai.mjs';
 
-export function cloudRoute({ accounts, library, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack, reserveTraffic, hubAi = null }) {
+export function cloudRoute({ accounts, library, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack, reserveTraffic, hubAi = null, adminContact }) {
   return async (req, res, url) => {
     const pathname = url.pathname;
     if (!pathname.startsWith('/api/cloud/')) return false;
     if (!accounts) throw new CloudError(404, '云端功能尚未启用');
     const user = requireUser(req);
     throttle(req, 'cloud-control', 120, user.id);
+    if (pathname === '/api/cloud/admin-contact' && req.method === 'GET') { json(res, 200, await adminContact()); return true; }
     if (pathname === '/api/cloud/me' && req.method === 'GET') {
       json(res, 200, { ...accounts.status(user.id), stage: library ? 'cloud-practice' : 'resource-foundation', ai: { keyStorage: 'browser-only', directConnection: true, serverRelay: false }, trafficScope: 'qbank-downloads-and-exports', personalMonthlyTrafficLimit: false, libraryReady: !!library, practiceReady: !!library?.practice }); return true;
     }

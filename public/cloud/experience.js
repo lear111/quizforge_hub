@@ -1,6 +1,7 @@
 import { bindCloudAi, setCloudAiPrefs } from './ai-client.js';
 import { bindActivity } from './activity.js';
 import { bindCloudLibrary } from './library.js';
+import { bindAdminContact } from '/admin-contact.js';
 // Free AI amounts are integers of 0.0001 yuan; shown in yuan rounded down to the cent, as on the Web.
 const yuan = amount => '¥' + (Math.floor(Number(amount || 0) / 100) / 100).toFixed(2);
 const size = bytes => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GiB` : `${(bytes / 1024 ** 2).toFixed(2)} MiB`;
@@ -19,6 +20,7 @@ const hubAccount = () => read('/api/cloud/ai/hub').catch(() => ({ connected: tru
 // Settings drive Web's own 用户中心 and AI 评分 markup (docs/HUB_CONNECT_AI.md 7.3). The visitor is
 // always signed in to Hub: no device login or device logout, and 退出登录 signs out of Hub.
 export function bindCloudExperience({ document, beforeLogout }) {
+  bindAdminContact({ document, endpoint: '/api/cloud/admin-contact' });
   bindActivity({ document, practice: true, endpoint: '/api/cloud/activity' });
   bindCloudLibrary(document);
   const get = id => document.getElementById(id), dialog = get('network-settings-dialog');

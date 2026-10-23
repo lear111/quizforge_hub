@@ -4,7 +4,7 @@ import path from 'node:path';
 import { CloudError } from '../cloud/accounts.mjs';
 import { bytes, filename, jsonBody, reason, send, uuid } from './common.mjs';
 
-export function createHubAdmin({ db, invitations, invitationPolicy, authPolicy, authCapabilities, metrics, requireUser, requireAdmin, throttle, cloud, token, uploadDir, enabled, officialAi, aiPoints, verifyPassword, shanghaiDay }) {
+export function createHubAdmin({ db, invitations, invitationPolicy, authPolicy, authCapabilities, adminContact, metrics, requireUser, requireAdmin, throttle, cloud, token, uploadDir, enabled, officialAi, aiPoints, verifyPassword, shanghaiDay }) {
   db.exec(`CREATE TABLE IF NOT EXISTS pack_admin_reviews(pack_id TEXT NOT NULL,revision INTEGER NOT NULL,sha256 TEXT NOT NULL,submission TEXT NOT NULL,PRIMARY KEY(pack_id,revision,sha256));
     CREATE TABLE IF NOT EXISTS pack_cloud_approvals(pack_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,sha256 TEXT NOT NULL,digests TEXT NOT NULL,status TEXT NOT NULL,actor_id TEXT NOT NULL,created INTEGER NOT NULL);`);
   const audit = (actor, action, target, detail) => db.prepare('INSERT INTO admin_audit VALUES (?,?,?,?,?,?)').run(randomUUID(), actor, target, action, JSON.stringify(detail), Date.now());
@@ -89,6 +89,18 @@ export function createHubAdmin({ db, invitations, invitationPolicy, authPolicy, 
     else if (/^\/ai-codes\/[a-f0-9-]{36}$/.test(route) && req.method === 'PUT' && aiPoints) {
       const { row, changed } = aiPoints.updateCode(route.split('/')[2], await jsonBody(req));
       if (changed.length) audit(actor.id, 'ai-code-updated', row.id, { seq: row.seq, prefix: row.prefix, changed }); value = { ok: true };
+    }
+    else if (route === '/contact' && ['GET', 'PUT'].includes(req.method)) {
+      if (req.method === 'PUT') {
+        const input = await jsonBody(req);
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          const change = adminContact.set(input);
+          if (change.previous.revision !== change.replacement.revision) audit(actor.id, 'admin-contact-updated', 'admin-contact', change);
+          db.exec('COMMIT');
+        } catch (error) { db.exec('ROLLBACK'); throw error; }
+      }
+      value = adminContact.get();
     }
     else if (route === '/authentication' && ['GET', 'PUT'].includes(req.method)) {
       if (req.method === 'PUT') {

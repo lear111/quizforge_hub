@@ -4,6 +4,7 @@ import { HubLogin } from '../cloud/hub-login.mjs';
 import { CloudError } from '../cloud/accounts.mjs';
 import { createHubSource, hubImportTarget } from '../cloud/hub-source.mjs';
 import { createPracticeAdminBridge } from '../admin/bridge.mjs';
+import { createAdminContactSource } from '../cloud/admin-contact.mjs';
 
 if (!process.env.DATA_DIR || path.basename(path.resolve(process.env.DATA_DIR)) !== 'quizforge-hub-practice') throw new Error('Dedicated practice data directory required');
 const practiceOrigin = 'https://practice.treenewbee.cloud', hubOrigin = 'https://quizforge.treenewbee.cloud';
@@ -30,6 +31,7 @@ const hubAi = {
 };
 const app = await createApp({
   hubAi,
+  adminContactSource: createAdminContactSource(),
   dataDir: process.env.DATA_DIR, cloudEnabled: true, cloudRuntimeDir: process.env.CLOUD_RUNTIME_DIR,
   resolveCloudPack: createHubSource({ origin: hubOrigin, dataDir: process.env.DATA_DIR }),
   reportActivity,
@@ -46,7 +48,7 @@ const app = await createApp({
     if (url.pathname === '/cloud/admin' || url.pathname.startsWith('/api/cloud/admin/')) throw new CloudError(404, '页面不存在');
     // The ordinary-user instance exposes practice and personal library routes;
     // public sharing/moderation remains on the original Hub instance.
-    if (!['/', '/api/me', '/api/config', '/styles.css', '/quizforge-icon.png', '/favicon.svg'].includes(url.pathname) && !url.pathname.startsWith('/cloud/') && !url.pathname.startsWith('/api/cloud/')) throw new CloudError(404, '页面不存在');
+    if (!['/', '/api/me', '/api/config', '/styles.css', '/admin-contact.js', '/admin-contact.css', '/quizforge-icon.png', '/favicon.svg'].includes(url.pathname) && !url.pathname.startsWith('/cloud/') && !url.pathname.startsWith('/api/cloud/')) throw new CloudError(404, '页面不存在');
     return false;
   }, identityProvider: req => login.resolve(req),
 });

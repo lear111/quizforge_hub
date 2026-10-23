@@ -40,14 +40,14 @@ export function ordinaryPracticeAsset(file, source, base) {
     // local network settings, adds its storage/download cards in Web's card style, and keeps the custom
     // model fields in a same-origin frame so the browser-local API Key never enters this page.
     source = source.replace(/<form id="network-settings-form">[\s\S]*?<\/form>/, '');
-    source = replaceRequired(source, '<div class="user-center-actions">', quotaCards + '<a href="https://quizforge.treenewbee.cloud/manage/#mine" target="_blank" rel="noopener">管理账号联系方式</a><div class="user-center-actions">');
+    source = replaceRequired(source, '<div class="user-center-actions">', quotaCards + '<a href="https://quizforge.treenewbee.cloud/manage/#mine" target="_blank" rel="noopener">管理账号联系方式</a><div class="user-center-actions"><button type="button" data-admin-contact aria-haspopup="dialog">管理员联系方式</button>');
     const custom = /<div id="ai-settings-custom" class="ai-custom" hidden>[\s\S]*?<section id="ai-settings-report"[^>]*><\/section>\s*<\/div>/;
     if (!custom.test(source)) throw new Error('Pinned Web AI settings adapter changed');
     source = source.replace(custom, `<div id="ai-settings-custom" class="ai-custom" hidden><iframe class="cloud-ai-frame" title="自定义模型设置" data-src="/cloud/ai?embedded=1&amp;base=${encodeURIComponent(base)}"></iframe></div>`);
     source = source.replace('href="https://quizforge.treenewbee.cloud/#library"', 'href="https://quizforge.treenewbee.cloud/manage/#library"');
     source = source.replace(/<dialog id="access-dialog">[\s\S]*?<\/dialog>/, '');
     source = source.replace(/<dialog id="hub-login-dialog"[\s\S]*?<\/dialog>/, '');
-    source = source.replace('</head>', '<link rel="stylesheet" href="/cloud/experience.css"></head>');
+    source = source.replace('</head>', '<link rel="stylesheet" href="/cloud/experience.css"><link rel="stylesheet" href="/cloud/admin-contact.css"></head>');
   }
   return source;
 }

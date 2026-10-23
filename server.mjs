@@ -29,6 +29,7 @@ import { createContactCodes, ContactCodeError } from './contact-codes.mjs';
 import { smsSettings, createSmsProvider } from './sms.mjs';
 import { createAuthPolicy } from './auth-policy.mjs';
 import { createCaptchaProvider } from './captcha.mjs';
+import { createAdminContact } from './admin-contact.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const derive = promisify(scrypt);
@@ -82,6 +83,7 @@ export async function createApp(options = {}) {
   const adminEnabled = options.adminEnabled ?? process.env.ADMIN_ENABLED === '1';
   const invitationPolicy = createInvitationPolicy(db, options.invitationRequired ?? process.env.INVITATION_REQUIRED === '1');
   const authPolicy = createAuthPolicy(db, invitationPolicy);
+  const adminContact = createAdminContact(db);
   const testCaptchaSource = [provider, smsProvider].find(source => source.captchaReady ?? source.ready);
   const captchaProvider = options.captchaProvider || (options.mailProvider || options.smsProvider ? { ready: !!testCaptchaSource,
     siteKey: testCaptchaSource?.siteKey || '', verify: (...args) => testCaptchaSource?.verify?.(...args) || false } : createCaptchaProvider());
@@ -287,7 +289,7 @@ export async function createApp(options = {}) {
     if (!file.name.toLowerCase().endsWith('.qbank')) fail(422, '此附件不是 .qbank 文件，暂不能下载到云端');
     return { file: path.join(uploadDir, file.id), filename: file.name, source: { kind: 'hub', packId, revision, sha256: file.sha256, title: row.title } };
   };
-  const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack: options.resolveCloudPack || resolveCloudPack, reserveTraffic, hubAi: options.hubAi ?? null });
+  const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack: options.resolveCloudPack || resolveCloudPack, reserveTraffic, hubAi: options.hubAi ?? null, adminContact: options.adminContactSource || adminContact.get });
   const handleLocalImport = createLocalImport({ db, uploadDir, enabled: localImportEnabled, throttle, reserveTraffic, json, openFile: options.localImportOpenFile });
   // AI service: the admin backend manages the switch and the upstream API keys, which are
   // stored encrypted with OFFICIAL_AI_MASTER_KEY; server file values are form defaults.
@@ -316,7 +318,7 @@ export async function createApp(options = {}) {
     return user;
   };
   const loginPurpose = user => 'login:' + user.id + ':' + hash(user.password);
-  const handleAdmin = createHubAdmin({ db, authPolicy, authCapabilities, officialAi: aiConfig, aiPoints, verifyPassword, shanghaiDay, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
+  const handleAdmin = createHubAdmin({ db, authPolicy, authCapabilities, adminContact, officialAi: aiConfig, aiPoints, verifyPassword, shanghaiDay, invitations, invitationPolicy, metrics, requireUser, requireAdmin, throttle, uploadDir, enabled: adminEnabled, token: req => sessionPattern.exec(req.headers.cookie || '')?.[1], cloud: options.adminCloud || createAdminClient({ port: Number(process.env.PRACTICE_ADMIN_PORT || 4324) }) });
   // Hub account connection and the official AI gateway (docs/HUB_CONNECT_AI.md).
   const connect = createConnect({ db, enabled: () => aiConfig.enabled(), identity, throttle, json, bodyJson, points: aiPoints, now: options.now });
   const officialAi = createOfficialAi({ db, config: aiConfig, connect, points: aiPoints, json, readBody, now: options.now, fetchImpl: options.officialAiFetch });
@@ -405,6 +407,7 @@ export async function createApp(options = {}) {
         res.writeHead(result.status, { 'Content-Type': result.type, 'Content-Length': result.bytes.length, 'Cache-Control': 'no-store' }); res.end(result.bytes); return;
       }
       if (pathname === '/api/me' && req.method === 'GET') { json(res, 200, { user: identity(req) }); return; }
+      if (pathname === '/api/admin-contact' && req.method === 'GET') { json(res, 200, await (options.adminContactSource || adminContact.get)()); return; }
       if (pathname === '/api/config' && req.method === 'GET') {
         const policy = authPolicy.get(), methods = policy.registrationCodeRequired || policy.loginCodeRequired ? verificationMethods() : { email: true, phone: true };
         const ready = (!policy.registrationCaptchaRequired || captchaProvider.ready) && (methods.email || methods.phone);
@@ -647,12 +650,15 @@ export async function createApp(options = {}) {
       if (['GET', 'HEAD'].includes(req.method) && !pathname.startsWith('/api/')) {
         const assets = { '/app.js': ['app.js', 'text/javascript'], '/local-import.js': ['local-import.js', 'text/javascript'], '/styles.css': ['styles.css', 'text/css'], '/favicon.svg': ['quizforge-icon.png', 'image/png'], '/quizforge-icon.png': ['quizforge-icon.png', 'image/png'] };
         assets['/activity.js'] = ['activity.js', 'text/javascript'];
+        assets['/admin-contact.js'] = ['admin-contact.js', 'text/javascript'];
+        assets['/admin-contact.css'] = ['admin-contact.css', 'text/css'];
         assets['/connect.js'] = ['connect.js', 'text/javascript'];
         if (adminEnabled) {
           if (pathname === '/admin/') { if (!identity(req)) { res.writeHead(303, { Location: '/manage/#admin', 'Cache-Control': 'no-store' }).end(); return; } requireAdmin(req); }
           assets['/admin/'] = ['admin/index.html', 'text/html']; assets['/admin/app.js'] = ['admin/app.js', 'text/javascript']; assets['/admin/ai.js'] = ['admin/ai.js', 'text/javascript']; assets['/admin/admin.css'] = ['admin/admin.css', 'text/css'];
         }
         if (cloudEnabled) {
+          assets['/cloud/admin-contact.css'] = ['admin-contact.css', 'text/css'];
           assets['/cloud/activity.js'] = ['activity.js', 'text/javascript'];
           assets['/cloud/library.js'] = ['cloud/library.js', 'text/javascript'];
           assets['/cloud/import'] = ['cloud/import.html', 'text/html'];

@@ -103,6 +103,11 @@ test('ordinary cloud home creates the basic bank once per user, keeps private st
   const library = await (await request('/api/cloud/library')).json(); assert.equal(library.items.length, 1);
   const item = library.items[0], pageUrl = a.headers.get('location');
   const html = await (await request(pageUrl)).text(); assert.match(html, /用户中心/); assert.doesNotMatch(html, />网络连接<|>拓展管理<|hub-practice-nav|network-settings-form/);
+  assert.match(html, /<button type="button" data-admin-contact aria-haspopup="dialog">管理员联系方式<\/button>/);
+  assert.match(html, /href="\/cloud\/admin-contact.css"/);
+  assert.equal((await request('/cloud/admin-contact.css')).status, 200);
+  assert.equal((await request('/api/cloud/admin-contact', '')).status, 401);
+  assert.deepEqual(await (await request('/api/cloud/admin-contact')).json(), { content: '', revision: 0 });
   assert.match(html, /href="\/cloud\/experience.css"/); assert.match(html, /data-src="\/cloud\/ai\?embedded=1&amp;base=%2Fcloud%2Fpractice%2F[a-f0-9-]{36}"/);
   // Web's own 用户中心 and AI 评分 markup, with the cloud storage cards; no device login dialog or page-held API Key field.
   for (const id of ['user-center-panel', 'user-center-redeem', 'ai-settings-enabled', 'ai-settings-useOfficial', 'ai-settings-points', 'cloud-storage-progress']) assert.match(html, new RegExp(`id="${id}"`));

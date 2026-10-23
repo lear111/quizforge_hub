@@ -1,5 +1,8 @@
 import { enhanceLocalImport } from './local-import.js';
 import { bindActivity } from './activity.js';
+import { bindAdminContact } from './admin-contact.js';
+
+bindAdminContact({ document });
 let localImport = null;
 const $ = selector => document.querySelector(selector);
 let cloudEnabled = false, practiceOrigin = '', invitationRequired = false, adminEnabled = false, officialAiEnabled = false;
