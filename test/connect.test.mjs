@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { randomUUID, createHash, randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import os from 'node:os';
+import http from 'node:http';
 import path from 'node:path';
 import { createApp } from '../server.mjs';
 import { authorizeParams, allowedRedirect } from '../connect.mjs';
@@ -235,4 +236,26 @@ test('turning the feature off hides every endpoint, and Shanghai days reset at l
   assert.equal(shanghaiDay(Date.parse('2026-10-22T16:00:00Z')), '2026-10-23');
   assert.equal(nextShanghaiMidnight(Date.parse('2026-10-22T10:00:00Z')), '2026-10-23T00:00:00+08:00');
   assert.throws(() => validateCompletion({ model: 'quizforge-official', messages: [{ role: 'tool', content: 'x' }] }), /消息格式/);
+});
+
+test('cloud practice grades with the signed-in session: account, redeem and gateway charge that user, loopback only', async t => {
+  const f = await fixture(t);
+  grant(f, 'alice', 50000);
+  assert.equal((await f.request('/internal/ai/me')).status, 401);
+  const me = await (await f.request('/internal/ai/me', { user: 'alice' })).json();
+  assert.equal(me.user.name, 'alice'); assert.equal(me.ai.balance, 50000); assert.equal(me.ai.enabled, true);
+  const graded = await f.request('/internal/ai/chat/completions', { method: 'POST', user: 'alice', body: { model: 'quizforge-official', stream: false, messages: [{ role: 'user', content: 'grade' }] } });
+  assert.equal(graded.status, 200);
+  const body = await graded.json();
+  assert.equal(body.quizforge.cost, 1); assert.equal(body.quizforge.balance, 49999);
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].body.model, 'qwen-vl-plus');
+  const empty = await f.request('/internal/ai/chat/completions', { method: 'POST', user: 'bob', body: { model: 'quizforge-official', messages: [{ role: 'user', content: 'grade' }] } });
+  assert.equal(empty.status, 402); assert.equal((await empty.json()).error.code, 'AI_BALANCE_EXHAUSTED');
+  const wrong = await f.request('/internal/ai/redeem', { method: 'POST', user: 'alice', body: { code: 'AI-0000-0000-0000-0000' } });
+  assert.ok(wrong.status >= 400);
+  // Only the practice service on this machine may call these, never a browser through the proxy.
+  const proxied = await new Promise((resolve, reject) => http.get(f.origin + '/internal/ai/me', { headers: { Host: 'quizforge.example', Cookie: f.users.alice.cookie } }, response => { response.resume(); resolve(response.statusCode); }).on('error', reject));
+  assert.equal(proxied, 403);
+  f.app.aiConfig.setEnabled('test', false);
+  assert.equal((await (await f.request('/internal/ai/me', { user: 'alice' })).json()).error.code, 'OFFICIAL_AI_DISABLED');
 });

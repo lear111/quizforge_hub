@@ -15,7 +15,8 @@ export async function attachCloudAi(service, runtime) {
   const snapshot = task => ({ ...task.value.snapshot, targetId: task.value.snapshot.targetId ?? null, targetGeneration: task.value.snapshot.targetGeneration ?? 0 });
   const profile = { enabled: true, autoGrade: false, vision: true, baseUrl: 'https://browser.invalid/v1', model: 'browser', apiKey: '', outputMode: 'json', maxOutputTokens: 8192, timeoutSeconds: 90 };
   function gateway(resources) {
-    const value = new OpenAiCompatibleProvider(null, resources, profile);
+    // The pinned Web provider binds an ordered list of sources; the cloud renders one request for the browser.
+    const value = new OpenAiCompatibleProvider(null, resources, [profile]);
     value.call = async (_profile, content, system) => ({ messages: [{ role: 'system', content: system }, { role: 'user', content }], max_tokens: 8192, response_format: { type: 'json_object' } });
     return value;
   }
@@ -107,12 +108,12 @@ export async function attachCloudAi(service, runtime) {
         }
         if (delivery.deadline <= Date.now() || !await ai.states.aiCurrent(collection, question, snapshot(task), task.value.taskId)) reject('AI_RESULT_STALE', '题目、答案或人工评分已变化，这次结果不会覆盖现有内容。');
         if (!['queued', 'running'].includes(task.value.status)) reject('AI_RESULT_STALE', '这次评分已停止，请手动重试。');
-        task.value.candidate = ai.candidate(task, { ...body.result, provider: 'openai-compatible' });
+        task.value.candidate = ai.candidate(task, { ...body.result, provider: body.result.provider === 'quizforge-official' ? 'quizforge-official' : 'openai-compatible' });
         delivery.resultHash = hash; ai.mark(task, 'succeeded'); await ai.autoApply(task); ai.live.delete(task.value.taskId);
         await service.exams.tick(); result = await ai.get(collection, question, task.value.taskId);
       } else {
         if (['queued', 'running'].includes(task.value.status)) {
-          const errors = { AI_AUTH: '模型认证失败，请检查 Key 和地址。', AI_QUOTA: '模型余额或额度不足。', AI_RATE_LIMIT: '模型请求受限，请稍后手动重试。', AI_OUTPUT_INVALID: '模型没有返回有效评分，请重试或人工评分。', AI_VISION_UNSUPPORTED: '本题含图片，请先测试并启用模型图片识别。', AI_INTERRUPTED: '浏览器评分已中断，请手动重试。' };
+          const errors = { AI_AUTH: '模型认证失败，请检查 Key 和地址。', AI_QUOTA: '模型余额或额度不足。', AI_RATE_LIMIT: '模型请求受限，请稍后手动重试。', AI_OUTPUT_INVALID: '模型没有返回有效评分，请重试或人工评分。', AI_VISION_UNSUPPORTED: '本题含图片，请先测试并启用模型图片识别。', AI_INTERRUPTED: '浏览器评分已中断，请手动重试。', AI_OFFICIAL_LOGIN: '登录已失效，请重新登录 Hub 后重试。', AI_OFFICIAL_BALANCE: '免费 AI 额度已用完，可在设置 → 用户中心兑换，或开启自定义模型。', AI_OFFICIAL_BUDGET: '免费 AI 今日额度已用完，请稍后再试或开启自定义模型。', AI_OFFICIAL_UNAVAILABLE: '免费 AI 暂时不可用，请稍后再试或开启自定义模型。', AI_UPSTREAM: '免费 AI 模型暂时没有响应，本次不扣额度，请稍后重试。', AI_TIMEOUT: '免费 AI 等待超时，本次不扣额度，请手动重试。', AI_NETWORK: '暂时无法连接 QuizForge 服务器，请稍后重试。', AI_INPUT_LIMIT: '评分内容或图片超出上限。', AI_CONFIG: '免费 AI 未接受这次评分请求，请人工评分或改用自定义模型。' };
           ai.mark(task, 'failed', Object.hasOwn(errors, body.code) ? body.code : 'AI_BROWSER_FAILED', errors[body.code] ?? '浏览器直连失败，请检查网络和模型跨域设置，再手动重试。'); ai.live.delete(task.value.taskId);
         }
         result = await ai.get(collection, question, task.value.taskId);

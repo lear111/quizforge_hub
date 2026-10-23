@@ -1,6 +1,7 @@
 import { bindCloudAi } from './ai-client.js';
 import { bindActivity } from './activity.js';
 import { bindCloudLibrary } from './library.js';
+const yuan = amount => '¥' + (Math.floor(Number(amount || 0) / 100) / 100).toFixed(2);
 const size = bytes => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GiB` : `${(bytes / 1024 ** 2).toFixed(2)} MiB`;
 export async function downloadCloudSelection(route, selection) {
   const response = await fetch(route, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(selection), signal: AbortSignal.timeout(135000) });
@@ -30,7 +31,8 @@ export function bindCloudExperience({ document, beforeLogout }) {
       }));
       if (current !== epoch) return;
       if (!identity.user) throw new Error('登录已失效，请重新登录。');
-      get('cloud-user-name').textContent = identity.user.name; get('cloud-user-email').textContent = identity.user.email;
+      get('cloud-user-name').textContent = identity.user.name; get('cloud-user-email').textContent = identity.user.email; get('cloud-user-avatar').textContent = Array.from(identity.user.name)[0] || 'Q';
+      loadPoints(current);
       for (const [id, field] of [['storage', 'storageBytes'], ['download', 'dailyTrafficBytes']]) {
         const used = resources.usage[field], limit = resources.limits[field], progress = get(`cloud-${id}-progress`);
         get(`cloud-${id}-value`).textContent = `${size(used)} / ${size(limit)}`;
@@ -39,12 +41,40 @@ export function bindCloudExperience({ document, beforeLogout }) {
       get('cloud-user-status').textContent = ''; get('cloud-user-details').hidden = false;
     } catch (error) { if (current === epoch) { get('cloud-user-status').textContent = error.message; get('cloud-user-login').hidden = false; } }
   }
+  // Free AI balance of this account (docs/HUB_CONNECT_AI.md 7.3); redeem codes go straight to it.
+  const points = get('cloud-ai-points'), result = get('cloud-redeem-result');
+  async function loadPoints(current) {
+    points.textContent = '正在查询…'; points.classList.remove('empty');
+    let value = null;
+    try { const response = await fetch('/api/cloud/ai/hub', { credentials: 'same-origin', cache: 'no-store' }); if (response.ok) value = await response.json(); } catch { }
+    if (current !== epoch) return;
+    if (!value || value.unavailable) points.textContent = '暂时查询不到';
+    else if (!value.connected) points.textContent = '登录已失效';
+    else { points.textContent = value.ai?.enabled ? yuan(value.ai.balance) : `${yuan(value.ai?.balance)} · 暂不可用`; points.classList.toggle('empty', (value.ai?.balance ?? 0) < 1); }
+  }
+  get('cloud-ai-refresh').addEventListener('click', () => loadPoints(epoch));
+  get('cloud-redeem-code').addEventListener('input', () => { result.textContent = ''; result.classList.remove('error'); });
+  get('cloud-redeem').addEventListener('submit', async event => {
+    event.preventDefault();
+    const input = get('cloud-redeem-code'), button = get('cloud-redeem-submit'), code = input.value.trim();
+    result.classList.remove('error');
+    if (!code) { result.textContent = '请输入兑换码。'; result.classList.add('error'); return; }
+    button.disabled = true; button.textContent = '正在处理…'; result.textContent = '';
+    try {
+      const response = await fetch('/api/cloud/ai/hub/redeem', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+      const value = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(value?.error?.message || (typeof value?.error === 'string' ? value.error : '兑换没有完成，请重试。'));
+      input.value = ''; result.textContent = `已兑换 ${yuan(value.added)}，当前剩余 ${yuan(value.balance)}。`;
+      points.textContent = yuan(value.balance); points.classList.toggle('empty', value.balance < 1);
+    } catch (error) { result.textContent = error.message || '兑换没有完成，请重试。'; result.classList.add('error'); }
+    finally { button.disabled = false; button.textContent = '兑换'; }
+  });
   function open() { select(get('settings-user-tab'), user); if (!dialog.open) dialog.showModal(); load(); }
   get('network-settings-open').addEventListener('click', open);
   get('network-settings-close').addEventListener('click', () => dialog.close());
   get('settings-user-tab').addEventListener('click', () => { select(get('settings-user-tab'), user); load(); });
   get('settings-ai-tab').addEventListener('click', () => {
-    select(get('settings-ai-tab'), ai); const frame = ai.querySelector('iframe'); if (!frame.hasAttribute('src')) frame.src = frame.dataset.src;
+    select(get('settings-ai-tab'), ai); const frame = ai.querySelector('iframe'); if (!frame.hasAttribute('src')) frame.src = frame.dataset.src; else frame.contentWindow?.postMessage({ type: 'qfh-ai-refresh' }, location.origin);
   });
   get('settings-appearance-tab').addEventListener('click', () => { user.hidden = true; ai.hidden = true; });
   dialog.addEventListener('close', () => { epoch++; });

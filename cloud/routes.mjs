@@ -2,8 +2,9 @@ import { CloudError } from './accounts.mjs';
 import fs from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { filename } from '../admin/common.mjs';
+import { hubAccount, hubRedeem, hubComplete } from './hub-ai.mjs';
 
-export function cloudRoute({ accounts, library, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack, reserveTraffic }) {
+export function cloudRoute({ accounts, library, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack, reserveTraffic, hubAi = null }) {
   return async (req, res, url) => {
     const pathname = url.pathname;
     if (!pathname.startsWith('/api/cloud/')) return false;
@@ -12,6 +13,19 @@ export function cloudRoute({ accounts, library, reviewPackages, requireUser, req
     throttle(req, 'cloud-control', 120, user.id);
     if (pathname === '/api/cloud/me' && req.method === 'GET') {
       json(res, 200, { ...accounts.status(user.id), stage: library ? 'cloud-practice' : 'resource-foundation', ai: { keyStorage: 'browser-only', directConnection: true, serverRelay: false }, trafficScope: 'qbank-downloads-and-exports', personalMonthlyTrafficLimit: false, libraryReady: !!library, practiceReady: !!library?.practice }); return true;
+    }
+    // Free AI with the signed-in account (docs/HUB_CONNECT_AI.md 7.3); errors keep their codes for the fallback.
+    if (pathname.startsWith('/api/cloud/ai/')) {
+      try {
+        if (!hubAi) throw Object.assign(new CloudError(503, '免费 AI 暂时不可用'), { code: 'AI_OFFICIAL_UNAVAILABLE' });
+        if (pathname === '/api/cloud/ai/hub' && req.method === 'GET') { json(res, 200, await hubAccount(hubAi, req)); return true; }
+        if (pathname === '/api/cloud/ai/hub/redeem' && req.method === 'POST') { json(res, 200, await hubRedeem(hubAi, req, (await bodyJson(req)).code)); return true; }
+        if (pathname === '/api/cloud/ai/complete' && req.method === 'POST') { throttle(req, 'cloud-ai-official', 30, user.id); json(res, 200, await hubComplete(hubAi, req)); return true; }
+      } catch (error) {
+        if (!(error instanceof CloudError) || !error.code) throw error;
+        json(res, error.status, { error: { code: error.code, message: error.message } }); return true;
+      }
+      throw new CloudError(404, '云端接口不存在');
     }
     const requireLibrary = () => { if (!library) throw new CloudError(503, '云端题库导入尚未配置'); return library; };
     if (pathname === '/api/cloud/extensions/submissions' && req.method === 'GET') { requireLibrary(); json(res, 200, { items: reviewPackages.list(user.id) }); return true; }

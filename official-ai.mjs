@@ -84,7 +84,13 @@ export function createOfficialAi({ db, config, connect, points, json, readBody, 
     if (url.pathname !== '/api/ai/v1/chat/completions') return false;
     if (req.method !== 'POST') fail(405, 'AI_REQUEST_UNSUPPORTED', '只支持 POST');
     if (!config.enabled()) fail(404, 'OFFICIAL_AI_DISABLED', '免费 AI 暂未开放');
-    const device = connect.device(req);
+    await complete(req, res, connect.device(req).user_id);
+    return true;
+  }
+  // Grades for one account; the device gateway above and cloud practice's signed-in
+  // session (server.mjs /internal/ai/, docs/HUB_CONNECT_AI.md 7.3) both end here.
+  async function complete(req, res, userId) {
+    if (!config.enabled()) fail(404, 'OFFICIAL_AI_DISABLED', '免费 AI 暂未开放');
     // Requests are buffered in memory (up to 12 MiB), so the whole site is capped too.
     if ([...active.values()].reduce((sum, value) => sum + value, 0) >= siteConcurrency) fail(429, 'AI_BUSY', '免费 AI 评分人数较多，请稍后再试');
     if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) fail(415, 'AI_REQUEST_UNSUPPORTED', '请使用 JSON 请求');
@@ -92,7 +98,6 @@ export function createOfficialAi({ db, config, connect, points, json, readBody, 
     try { raw = await readBody(req, 13 * MiB); } catch (error) { if (error.status === 413) fail(413, 'AI_REQUEST_TOO_LARGE', '请求超过 12 MiB 上限'); throw error; }
     let body; try { body = JSON.parse(raw.toString('utf8')); } catch { reject('请求内容不是有效的 JSON'); }
     const request = validateCompletion(body);
-    const userId = device.user_id;
     if ((active.get(userId) || 0) >= 2) fail(429, 'AI_BUSY', '同时进行的评分太多，请等前面的评分完成后再试');
     // The balance is only spent after a model answers, so failures cost nothing.
     if (points.balance(userId) < 1) fail(402, 'AI_BALANCE_EXHAUSTED', '免费 AI 额度已用完，可以在设置 → 用户中心输入兑换码获取额度，也可以改用自己的模型。', { balance: 0 });
@@ -120,7 +125,6 @@ export function createOfficialAi({ db, config, connect, points, json, readBody, 
     config.record(used.id, answer.usage, cost);
     db.prepare('INSERT INTO official_ai_usage (user_id,day,calls,tokens,points) VALUES (?,?,1,?,?) ON CONFLICT(user_id,day) DO UPDATE SET calls=calls+1,tokens=tokens+excluded.tokens,points=points+excluded.points').run(userId, shanghaiDay(now()), tokens, spent);
     json(res, 200, { id: 'qf-' + randomUUID(), object: 'chat.completion', model: 'quizforge-official', choices: answer.choices, ...(answer.usage ? { usage: answer.usage } : {}), quizforge: { cost: spent, balance: points.balance(userId) } });
-    return true;
   }
-  return { handle, usage };
+  return { handle, complete, usage };
 }

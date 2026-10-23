@@ -98,7 +98,7 @@ export class CloudPractice {
     // Deliberately do not call local start(): it would create background exam
     // writers and network listeners outside the cloud transaction boundary.
     // Exam deadlines are advanced by the core on the next scoped exam request.
-    await attachCloudAi(service, r);
+    await attachCloudAi(service, r, this.library.hubAi);
     service.ready = true;
     this.sessions.set(row.id, service); return service;
   }

@@ -91,7 +91,7 @@ export async function createApp(options = {}) {
     defaults: options.cloud?.defaults ?? { storageBytes: Number(process.env.CLOUD_STORAGE_MB || 256) * MB, dailyTrafficBytes: Number(process.env.CLOUD_DAILY_TRAFFIC_MB || 256) * MB, monthlyTrafficBytes: Number(process.env.CLOUD_MONTHLY_TRAFFIC_MB || 1024) * MB },
   }) : null;
   const runtimeDirectory = options.cloudRuntimeDir ?? process.env.CLOUD_RUNTIME_DIR;
-  const cloudLibrary = cloudAccounts && runtimeDirectory ? await CloudLibrary.create(db, cloudAccounts, dataDir, runtimeDirectory, { unifiedWorkspace: !!options.practiceHome }) : null;
+  const cloudLibrary = cloudAccounts && runtimeDirectory ? await CloudLibrary.create(db, cloudAccounts, dataDir, runtimeDirectory, { unifiedWorkspace: !!options.practiceHome, hubAi: options.hubAi ?? null }) : null;
   const reviewPackages = cloudLibrary ? new ReviewPackages(cloudLibrary) : null;
   db.exec('CREATE TABLE IF NOT EXISTS traffic (period TEXT PRIMARY KEY, bytes INTEGER NOT NULL)');
   const month = () => new Intl.DateTimeFormat('en-CA', { timeZone: process.env.BILLING_TIMEZONE || 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date());
@@ -266,7 +266,7 @@ export async function createApp(options = {}) {
     if (!file.name.toLowerCase().endsWith('.qbank')) fail(422, '此附件不是 .qbank 文件，暂不能下载到云端');
     return { file: path.join(uploadDir, file.id), filename: file.name, source: { kind: 'hub', packId, revision, sha256: file.sha256, title: row.title } };
   };
-  const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack: options.resolveCloudPack || resolveCloudPack, reserveTraffic });
+  const handleCloud = cloudRoute({ accounts: cloudAccounts, library: cloudLibrary, reviewPackages, requireUser, requireAdmin, bodyJson, throttle, json, resolveCloudPack: options.resolveCloudPack || resolveCloudPack, reserveTraffic, hubAi: options.hubAi ?? null });
   const handleLocalImport = createLocalImport({ db, uploadDir, enabled: localImportEnabled, throttle, reserveTraffic, json, openFile: options.localImportOpenFile });
   // AI service: the admin backend manages the switch and the upstream API keys, which are
   // stored encrypted with OFFICIAL_AI_MASTER_KEY; server file values are form defaults.
@@ -317,6 +317,17 @@ export async function createApp(options = {}) {
         const user = requireUser(req); const input = await bodyJson(req);
         if (!['visit', 'practice', 'heartbeat'].includes(input.kind)) fail(400, '活动类型无效');
         throttle(req, 'activity-service', 60, user.id); metrics.record(user.id, input.kind); json(res, 200, { ok: true }); return;
+      }
+      // Cloud practice grades with the signed-in account's free AI balance, no device token
+      // (docs/HUB_CONNECT_AI.md 7.3). The practice service relays the user's Hub session.
+      if (pathname.startsWith('/internal/ai/')) {
+        if (req.headers.host !== `127.0.0.1:${server.address().port}` || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) fail(403, '仅允许服务内部访问');
+        if (!aiConfig.enabled()) throw new ConnectError(404, 'OFFICIAL_AI_DISABLED', '免费 AI 暂未开放');
+        const user = identity(req) || (() => { throw new ConnectError(401, 'HUB_LOGIN_REQUIRED', '登录已失效，请重新登录 Hub'); })();
+        if (pathname === '/internal/ai/me' && req.method === 'GET') { json(res, 200, { user: { name: user.name, email: user.email }, ai: officialAi.usage(user.id) }); return; }
+        if (pathname === '/internal/ai/redeem' && req.method === 'POST') { throttle(req, 'connect-redeem', 10, user.id); json(res, 200, aiPoints.redeem(user.id, (await bodyJson(req)).code)); return; }
+        if (pathname === '/internal/ai/chat/completions' && req.method === 'POST') { await officialAi.complete(req, res, user.id); return; }
+        fail(404, '页面不存在');
       }
       if (pathname === '/api/cloud/activity' && req.method === 'POST' && options.reportActivity) {
         const user = requireUser(req); throttle(req, 'activity-relay', 40, user.id); const input = await bodyJson(req);

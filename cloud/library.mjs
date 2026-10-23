@@ -22,7 +22,7 @@ export function treeBytes(directory, { ignoreTemp = false, ignorePlatform = fals
   visit(directory); return bytes;
 }
 export class CloudLibrary {
-  static async create(db, accounts, dataDir, runtimeDirectory, { unifiedWorkspace = false } = {}) {
+  static async create(db, accounts, dataDir, runtimeDirectory, { unifiedWorkspace = false, hubAi = null } = {}) {
     const runtime = await loadRuntime(runtimeDirectory), review = new ExtensionReviews(db, runtime.manifest.builtins);
     const result = new CloudLibrary(db, accounts, dataDir, runtime, review);
     let engine;
@@ -35,7 +35,7 @@ export class CloudLibrary {
       validationEnvironment: () => engine.validationEnvironment(), background: fn => engine.background(fn),
     };
     result.practice = new CloudPractice(result);
-    result.unifiedWorkspace = unifiedWorkspace;
+    result.unifiedWorkspace = unifiedWorkspace; result.hubAi = hubAi;
     return result;
   }
   constructor(db, accounts, dataDir, runtime, reviews) {

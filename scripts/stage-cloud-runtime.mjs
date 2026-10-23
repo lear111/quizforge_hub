@@ -29,8 +29,12 @@ const basic = path.join(target, 'basic-content'), archive = new LibraryArchive(b
 const exported = await archive.exportGroup('基础题型');
 fs.copyFileSync(exported.file, path.join(target, 'basic-demo.qbank')); exported.close();
 const reviews = fs.readdirSync(path.join(basic, 'extensions', '基础题型')).filter(name => !name.startsWith('.')).map(name => extensionDigest(path.join(basic, 'extensions', '基础题型', name)));
-let revision = 'working-tree';
-try { revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: source, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { }
+let revision = 'working-tree', includesWorkingTree = true;
+try {
+  revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: source, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  // A clean checkout of core/ is exactly that commit.
+  includesWorkingTree = execFileSync('git', ['status', '--porcelain', '--', 'core', 'extensions', 'question-banks'], { cwd: source, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() !== '';
+} catch { }
 const inventory = [];
 function visit(directory) {
   for (const name of fs.readdirSync(directory).sort()) {
@@ -41,5 +45,5 @@ function visit(directory) {
   }
 }
 visit(target);
-fs.writeFileSync(path.join(target, 'snapshot.json'), JSON.stringify({ schemaVersion: 1, sourceRevision: revision, includesWorkingTree: true, runtimeTarget: { platform: process.platform, arch: process.arch, libc: process.platform === 'linux' ? process.report.getReport().header.glibcVersionRuntime ? 'glibc' : 'musl' : null }, builtins: reviews, inventory }, null, 2));
+fs.writeFileSync(path.join(target, 'snapshot.json'), JSON.stringify({ schemaVersion: 1, sourceRevision: revision, includesWorkingTree, runtimeTarget: { platform: process.platform, arch: process.arch, libc: process.platform === 'linux' ? process.report.getReport().header.glibcVersionRuntime ? 'glibc' : 'musl' : null }, builtins: reviews, inventory }, null, 2));
 console.log(JSON.stringify({ target, files: inventory.length, extensions: reviews.map(item => ({ id: item.extensionId, digest: item.digest })) }));

@@ -11,7 +11,9 @@
 - 官方模型的 API Key 只存在 Hub 服务器上，不进入任何客户端、安装包、仓库或网页。
 - 账号注册沿用 Hub 现有流程（邮箱验证码 + 邀请码），本协议不改变注册门槛。
 
-不在 v1 范围：跨设备同步或备份、题库下载与账号关联、Hub 云端练习使用免费 AI、在线支付购买额度。
+不在 v1 范围：跨设备同步或备份、题库下载与账号关联、在线支付购买额度。
+
+2026-10-22 补充（用户确认）：Hub 云端练习也使用免费 AI 额度。云端练习用户本来就登录着 Hub，直接扣该账号的余额，不走设备授权（第 7.3 节）。
 
 ## 2. 名词
 
@@ -169,6 +171,17 @@ Content-Type: application/json
 - 界面直接沿用 Web 的 AI 设置，不新增菜单。
 - 用 Custom Tabs 打开授权页，`client=android`，回调 `quizforge://hub/connect`；设备令牌用 Android Keystore 加密保存。
 - 免费 AI 请求由原生 `AiGateway` 发出，规则与 7.1 相同。
+
+### 7.3 Hub 云端练习
+
+云端练习（`quizforge-hub-practice`）的访问者已经登录 Hub，所以不需要设备令牌、登录窗口或设备退出。
+
+- 设置 → **AI 评分** 与 Web 相同：开关、自动评分、两个来源（免费 AI 额度旁显示剩余金额）、两者都选时优先免费额度。自定义模型仍是云端原有的浏览器本地配置（Key 只在浏览器中，可用本地口令加密保存）。开关和来源的选择保存在当前浏览器。
+- 设置 → **用户中心** 显示账号名、邮箱、免费 AI 余额、兑换码输入框、存储和下载用量，以及原有的“退出登录”（同时退出 Hub）。没有设备名、登录按钮和设备退出。
+- 评分流程：浏览器领取评分任务（`/api/cloud-ai/claim`）后，选了免费额度时把评分输入发到练习服务的 `POST /api/cloud/ai/complete`；练习服务带着该用户的 Hub 会话转发到主 Hub 的 `POST /internal/ai/chat/completions`，与第 6 节网关走同一段逻辑（同样的 Key 顺序、单价、并发和余额检查），扣当前会话用户的余额。浏览器拿到结果后与自定义模型一样用 `/api/cloud-ai/result` 保存。模型调用不在练习工作区的保存事务内进行。
+- 余额与兑换：`GET /api/cloud/ai/hub` 返回 `{connected, user, ai, manageUrl}`（形状与 Web 的 `/api/settings/ai/hub` 相同）；`POST /api/cloud/ai/hub/redeem` 直接兑换到当前账号。练习服务分别转发到主 Hub 的 `GET /internal/ai/me` 与 `POST /internal/ai/redeem`。
+- 主 Hub 的 `/internal/ai/*` 只接受本机回环地址且 Host 为 `127.0.0.1:端口` 的请求，按 Hub 会话识别用户（停用账号无效）；免费 AI 关闭时返回 404 `OFFICIAL_AI_DISABLED`。
+- 免费额度失败时的错误码与 Web 的分类相同（`AI_OFFICIAL_LOGIN`、`AI_OFFICIAL_BALANCE`、`AI_OFFICIAL_BUDGET`、`AI_OFFICIAL_UNAVAILABLE`、`AI_UPSTREAM`、`AI_TIMEOUT`、`AI_NETWORK`、`AI_RATE_LIMIT`）；同时选了自定义模型且已解锁时，这些情况下本次改用自定义模型。
 
 ## 8. 服务器配置
 

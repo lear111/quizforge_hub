@@ -30,11 +30,20 @@ function forgetSession() {
   document.querySelectorAll('input[type=password]').forEach(input => { input.value = ''; });
 }
 const embedded = new URLSearchParams(location.search).get('embedded') === '1';
+// The on/off switch and the two sources, as on the Web (non-secret, kept in this browser).
+// Settings saved before the free quota existed keep using the custom model.
+const prefsName = () => `qfh.ai.prefs.v1:${user.id}`;
+function prefs() {
+  try { const raw = localStorage.getItem(prefsName()); if (raw) { const value = JSON.parse(raw); return Object.fromEntries(['enabled', 'autoGrade', 'useOfficial', 'useCustom'].map(key => [key, value?.[key] === true])); } } catch { }
+  let stored = null; try { stored = saved(); } catch { }
+  return stored ? { enabled: stored.enabled !== false, autoGrade: stored.autoGrade === true, useOfficial: false, useCustom: true } : { enabled: false, autoGrade: false, useOfficial: false, useCustom: false };
+}
 function notifyAiStatus() {
   if (!embedded || window.parent === window) return;
-  const profile = user && session(user.id);
-  window.parent.postMessage({ type: 'qfh-ai-status', account: user?.id ?? '', enabled: profile?.enabled === true, autoGrade: profile?.autoGrade === true }, location.origin);
+  const value = user ? prefs() : {}, custom = !!(value.useCustom && session(user.id));
+  window.parent.postMessage({ type: 'qfh-ai-status', account: user?.id ?? '', enabled: !!value.enabled && (value.useOfficial || custom), autoGrade: !!value.autoGrade, official: !!value.useOfficial, custom }, location.origin);
 }
+const yuan = amount => '¥' + (Math.floor(Number(amount || 0) / 100) / 100).toFixed(2);
 let generating = false;
 window.addEventListener('message', async event => {
   if (!embedded || event.origin !== location.origin || event.source !== window.parent || event.data?.type !== 'qfh-ai-generate') return;
@@ -87,12 +96,24 @@ function aiPage() {
   try { stored = saved(); } catch { initialError = '无法读取本地配置，可清除后重新填写；本次页面使用仍可配置。'; }
   const current = session(user.id), profile = current || stored || { baseUrl: '', model: '' };
   let testReport = profile.testReport ?? null;
-  app.innerHTML = heading('AI 设置', '模型由你选择，调用费用由模型服务商向你收取。') + `<section class="cloud-ai">
+  let choice = prefs();
+  app.innerHTML = heading('AI 评分', '可使用账号的免费 AI 额度，也可以使用自己的模型。') + `<section class="cloud-ai">
+    <form id="ai-prefs" autocomplete="off">
+      <label class="cloud-switch">开启 AI 评分<input name="enabled" type="checkbox" role="switch" ${choice.enabled ? 'checked' : ''}></label>
+      <div id="ai-options">
+        <label class="cloud-check"><input name="autoGrade" type="checkbox" ${choice.autoGrade ? 'checked' : ''}>提交答案后自动 AI 评分</label>
+        <fieldset class="cloud-source"><legend>评分来源（可同时开启，优先使用免费额度）</legend>
+          <label class="cloud-check"><input name="useOfficial" type="checkbox" ${choice.useOfficial ? 'checked' : ''}><span>使用免费 AI 额度</span><span id="ai-points" class="cloud-points"></span></label>
+          <p class="field-help">评分时，题目、答案和图片会经 QuizForge 服务器发送给模型服务商（通义千问），服务器不保存这些内容。额度用完或暂时不可用时，如果开启了自定义模型，会自动改用自定义模型。</p>
+          <label class="cloud-check"><input name="useCustom" type="checkbox" ${choice.useCustom ? 'checked' : ''}><span>使用自定义模型</span></label>
+        </fieldset>
+      </div>
+      <p id="ai-prefs-status" class="cloud-status" role="status"></p>
+    </form>
+    <div id="ai-custom" class="cloud-custom">
     <div class="cloud-notice"><strong>API Key 仅保存在你的设备上</strong><br>默认仅在当前页面使用；选择“记住此设备”后，用你设置的独立口令加密保存在当前浏览器，不上传至 Hub，也不会随账户同步。<br>浏览器直接连接你填写的模型服务；评分时，相关题目与作答会发送给该服务。模型接口需要允许浏览器跨域访问，不兼容时不会自动转发 Key 到 Hub。<br>本地保存不能防止设备失陷或恶意网页脚本，请使用专用、有限额的 Key。清除浏览器数据或更换设备后需要重新配置。</div>
     <p class="cloud-muted">支持题卡手动评分、提交后自动评分及考试交卷后的评分。评分期间请保持此页面打开；关闭或断线后请手动重试，不会自动重复调用。</p>
     <form id="ai-form" autocomplete="off">
-      <label class="cloud-check"><input name="enabled" type="checkbox" ${profile.enabled !== false ? 'checked' : ''}>启用 AI 评分</label>
-      <label class="cloud-check"><input name="autoGrade" type="checkbox" ${profile.autoGrade ? 'checked' : ''}>提交答案后自动评分（会产生模型调用）</label>
       <label class="cloud-check"><input name="vision" type="checkbox" disabled ${profile.vision ? 'checked' : ''}>图片评分（模型图片识别测试通过后启用）</label>
       <div class="field"><label for="model-url">模型 API 基础地址</label><input id="model-url" name="baseUrl" type="url" required maxlength="2048" placeholder="https://你的模型服务地址/v1" value="${esc(profile.baseUrl)}"><p class="field-help">填写可信服务地址，程序会在其后添加 /chat/completions。更换服务地址时必须重新填写 Key。</p></div>
       <div class="field"><label for="model-name">模型名称</label><input id="model-name" name="model" required maxlength="200" value="${esc(profile.model)}"></div>
@@ -102,27 +123,58 @@ function aiPage() {
       <div class="field"><label for="local-passphrase">本地解锁口令</label><input id="local-passphrase" name="passphrase" type="password" autocomplete="new-password" maxlength="1024"><p class="field-help">至少 8 个字符，不上传 Hub，请勿填写 Hub 登录密码。下次打开页面需重新解锁，Hub 无法恢复遗忘的口令。</p></div>
       <p class="form-error" role="alert">${esc(initialError)}</p><p id="ai-status" class="cloud-status" role="status">${current ? '已在当前页面配置' : stored ? '此设备已有加密配置，尚未解锁' : '尚未配置'}</p><p class="field-help">模型测试包含文字连接、评分输出和图片识别，最多调用 3 次。图片通过仅代表基础识别成功，复杂图表及手写仍需实际验证。</p>
       <div class="cloud-actions"><button class="button" type="submit">保存到本地</button><button class="button secondary" type="button" data-ai-action="unlock">解锁已保存配置</button><button class="button secondary" type="button" data-ai-action="test">测试直连（会产生模型调用）</button><button class="text-button" type="button" data-ai-action="clear">清除本地配置</button></div>
-    </form></section>`;
-  const form = app.querySelector('#ai-form');
+    </form></div></section>`;
+  const form = app.querySelector('#ai-form'), choices = app.querySelector('#ai-prefs'), points = app.querySelector('#ai-points');
+  function describe() {
+    const custom = session(user.id);
+    if (!choice.enabled) return 'AI 评分未开启，仍可人工评分。';
+    const sources = [choice.useOfficial && '免费 AI 额度', choice.useCustom && '自定义模型'].filter(Boolean);
+    if (!sources.length) return '请选择至少一个评分来源。';
+    if (choice.useCustom && !custom && !choice.useOfficial) return '请在下方保存或解锁自定义模型后使用。';
+    const how = sources.length === 2 ? '优先使用免费 AI 额度，不可用时改用自定义模型' : `使用${sources[0]}`;
+    return `AI 评分已开启（${how}），` + (choice.autoGrade ? '提交答案后自动评分，结果自动保存。' : '可在题卡点击评分，结果自动保存。') + (choice.useCustom && !custom && choice.useOfficial ? '自定义模型尚未解锁。' : '');
+  }
+  function showChoices() {
+    app.querySelector('#ai-options').hidden = !choice.enabled; app.querySelector('#ai-custom').hidden = !choice.enabled || !choice.useCustom;
+    app.querySelector('#ai-prefs-status').textContent = describe();
+  }
+  async function loadPoints() {
+    let text = '正在查询…', value = null;
+    points.textContent = text; points.classList.remove('empty');
+    try { const response = await fetch('/api/cloud/ai/hub', { cache: 'no-store', credentials: 'same-origin' }); value = response.ok ? await response.json() : null; } catch { }
+    if (!value) text = '暂时查询不到余额';
+    else if (!value.connected) text = '登录已失效';
+    else if (value.unavailable) text = '暂时查询不到余额';
+    else if (!value.ai?.enabled) text = '暂不可用';
+    else { text = `剩余 ${yuan(value.ai.balance)}`; points.classList.toggle('empty', value.ai.balance < 1); }
+    points.textContent = text;
+  }
+  choices.addEventListener('change', () => {
+    choice = Object.fromEntries(['enabled', 'autoGrade', 'useOfficial', 'useCustom'].map(key => [key, choices.elements[key].checked]));
+    try { localStorage.setItem(prefsName(), JSON.stringify(choice)); } catch { }
+    showChoices(); notifyAiStatus();
+  });
+  window.addEventListener('message', event => { if (event.origin === location.origin && event.source === window.parent && event.data?.type === 'qfh-ai-refresh') loadPoints(); });
+  showChoices(); loadPoints();
   const reportText = () => testReport ? testReport.checks.map(check => check.label + (check.ok ? '通过' : '未通过或未完成')).join('；') : '';
   if (testReport) form.querySelector('#ai-status').textContent += ' · 上次测试：' + reportText();
   form.addEventListener('input', event => { if (['baseUrl','model','apiKey','outputMode'].includes(event.target.name)) { testReport = null; form.elements.vision.checked = false; } });
   async function perform(action) {
     const data = Object.fromEntries(new FormData(form)), error = form.querySelector('.form-error'), status = form.querySelector('#ai-status');
-    for (const key of ['enabled', 'autoGrade', 'vision']) data[key] = form.elements[key].checked;
+    data.enabled = true; data.autoGrade = false; data.vision = form.elements.vision.checked;
     const started = epoch, account = user?.id;
     error.textContent = ''; status.textContent = '正在处理…';
     const buttons = [...form.querySelectorAll('button')]; buttons.forEach(button => { button.disabled = true; });
     try {
       if (action === 'clear') {
-        forgetSession(); testReport = null; localStorage.removeItem(keyName()); form.reset(); form.elements.apiKey.value = ''; form.elements.passphrase.value = ''; form.elements.remember.checked = false; status.textContent = '本地配置已清除'; return;
+        forgetSession(); testReport = null; localStorage.removeItem(keyName()); form.reset(); form.elements.apiKey.value = ''; form.elements.passphrase.value = ''; form.elements.remember.checked = false; status.textContent = '本地配置已清除'; showChoices(); return;
       }
       if (!crypto.subtle) throw new Error('请通过 HTTPS 或本机地址打开设置页面');
       if (action === 'unlock') {
         const value = saved(); if (!value) throw new Error('此设备尚无加密配置');
         const apiKey = await decryptKey(value.envelope, data.passphrase, bound(value.baseUrl));
         if (epoch !== started || user?.id !== account) return;
-        setSession(user.id, { ...value, apiKey }); testReport = value.testReport ?? null; notifyAiStatus(); form.elements.baseUrl.value = value.baseUrl; form.elements.model.value = value.model; form.elements.outputMode.value = value.outputMode || 'json'; for (const key of ['enabled','autoGrade','vision']) form.elements[key].checked = session(user.id)[key]; form.elements.apiKey.value = ''; form.elements.passphrase.value = ''; status.textContent = '已解锁，仅在当前页面使用' + (testReport ? ' · 上次测试：' + reportText() : ''); return;
+        setSession(user.id, { ...value, apiKey, enabled: true }); testReport = value.testReport ?? null; notifyAiStatus(); showChoices(); form.elements.baseUrl.value = value.baseUrl; form.elements.model.value = value.model; form.elements.outputMode.value = value.outputMode || 'json'; form.elements.vision.checked = session(user.id).vision; form.elements.apiKey.value = ''; form.elements.passphrase.value = ''; status.textContent = '已解锁，仅在当前页面使用' + (testReport ? ' · 上次测试：' + reportText() : ''); return;
       }
       const previous = session(user.id);
       const normalizedUrl = new URL(data.baseUrl).href.replace(/\/$/, '');
@@ -142,7 +194,7 @@ function aiPage() {
       // appears in localStorage, URL parameters, Hub requests or global objects.
       if (envelope) { const { apiKey: _secret, ...settings } = profile; localStorage.setItem(keyName(), JSON.stringify({ version: 1, ...settings, envelope })); }
       else localStorage.removeItem(keyName());
-      setSession(user.id, profile); notifyAiStatus(); form.elements.apiKey.value = ''; form.elements.passphrase.value = '';
+      setSession(user.id, profile); notifyAiStatus(); showChoices(); form.elements.apiKey.value = ''; form.elements.passphrase.value = '';
       status.textContent = envelope ? '已加密保存到此设备，当前页面已解锁' : '仅在当前页面使用，关闭或离开页面后清除';
     } catch (failure) {
       // Never render native URL/parser/provider exceptions, which may contain

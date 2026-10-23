@@ -13,7 +13,22 @@ const reportActivity = async (req, kind) => {
   const response = await fetch('http://127.0.0.1:4318/internal/activity', { method: 'POST', headers: { Cookie: 'qfh_session=' + token, Origin: hubOrigin, 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }), redirect: 'error', signal: AbortSignal.timeout(5000) });
   await response.body?.cancel();
 };
+// Free AI for the signed-in account (docs/HUB_CONNECT_AI.md 7.3): the Hub charges the
+// session user; network failures surface as status 0.
+const hubAi = {
+  manageUrl: hubOrigin + '/manage/',
+  async call(req, name, body, timeoutMs = 10000) {
+    const token = login.token(req);
+    if (!token) return { status: 401, body: { error: { code: 'HUB_LOGIN_REQUIRED', message: '登录已失效，请重新登录 Hub' } } };
+    try {
+      const response = await fetch('http://127.0.0.1:4318/internal/ai/' + name, { method: body === undefined ? 'GET' : 'POST', headers: { Cookie: 'qfh_session=' + token, Origin: hubOrigin, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
+      let value = null; try { value = await response.json(); } catch { }
+      return { status: response.status, body: value };
+    } catch (error) { return { status: 0, timeout: error?.name === 'TimeoutError', body: null }; }
+  },
+};
 const app = await createApp({
+  hubAi,
   dataDir: process.env.DATA_DIR, cloudEnabled: true, cloudRuntimeDir: process.env.CLOUD_RUNTIME_DIR,
   resolveCloudPack: createHubSource({ origin: hubOrigin, dataDir: process.env.DATA_DIR }),
   reportActivity,

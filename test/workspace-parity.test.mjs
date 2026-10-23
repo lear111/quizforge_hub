@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { CloudAccounts } from '../cloud/accounts.mjs';
 import { CloudLibrary, treeBytes } from '../cloud/library.mjs';
 
-const snapshot = process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-20261021-parity', import.meta.url));
+const snapshot = process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-20261022', import.meta.url));
 const oldSnapshot = fileURLToPath(new URL('../.runtime/web-current', import.meta.url));
 const alice = '11111111-1111-4111-8111-111111111111', bob = '22222222-2222-4222-8222-222222222222';
 const enabled = fs.existsSync(snapshot) && JSON.parse(fs.readFileSync(path.join(snapshot, 'snapshot.json'))).builtins.some(row => row.extensionId === 'quizforge.short-answer-area');
@@ -154,7 +154,7 @@ test('workspace module graph and controls follow pinned Web, with only cloud set
   const f = await fixture(t), lib = f.library, item = await lib.ensureDemo(alice), base = '/cloud/practice/' + item.id + '/';
   const asset = name => lib.practice.asset(alice, item.id, name, { ordinary: true }).bytes.toString();
   const html = asset('index.html'), upstream = fs.readFileSync(path.join(snapshot, 'core/web/index.html'), 'utf8');
-  const lock = JSON.parse(fs.readFileSync(new URL('../deploy/web-workspace-20261021.json', import.meta.url))), inventory = new Map(lib.runtime.manifest.inventory.map(row => [row.path, row.sha256]));
+  const lock = JSON.parse(fs.readFileSync(new URL('../deploy/web-workspace-20261022.json', import.meta.url))), inventory = new Map(lib.runtime.manifest.inventory.map(row => [row.path, row.sha256]));
   for (const row of lock.inventory) assert.equal(inventory.get(row.path), row.sha256, row.path);
   for (const id of ['library-import', 'library-import-dialog', 'library-import-file', 'library-manage-dialog']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1);
