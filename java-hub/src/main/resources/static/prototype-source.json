@@ -1,0 +1,6 @@
+{
+  "prototype": "题库广场界面-简洁版.html",
+  "sha256": "5e7fe6301dbc989fda3653c3a822553ca4456574535c8d1b1f84da571afe681d",
+  "generatedBy": "scripts/prepare-java-ui.mjs",
+  "demoDataIncluded": false
+}

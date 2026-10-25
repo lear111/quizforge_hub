@@ -12,3 +12,9 @@ coverage/
 *.log
 output/
 .runtime/
+.temp/
+java-hub/target/
+java-hub/data-java/
+DEVELOPMENT_LOG.md
+/UI原型/
+/.claude/

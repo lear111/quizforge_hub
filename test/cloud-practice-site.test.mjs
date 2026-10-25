@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { createApp } from '../server.mjs';
+import { createPracticeApp as createApp } from '../practice/server.mjs';
 import { HubLogin } from '../cloud/hub-login.mjs';
 import { ordinaryPracticeAsset } from '../cloud/practice-ui.mjs';
 
@@ -88,12 +88,13 @@ test('Hub login handoff binds browser state, uses one-time short-lived codes, ch
 
 test('ordinary cloud home creates the basic bank once per user, keeps private state and leaves daily quota available for downloads', { skip: !fs.existsSync(snapshot) }, async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'qfh-ordinary-'));
-  const { server, cloudLibrary } = await createApp({ dataDir: directory, cloudEnabled: true, cloudRuntimeDir: snapshot, practiceHome: true, mailProvider: { ready: false },
+  const practiceApp = await createApp({ dataDir: directory, cloudEnabled: true, cloudRuntimeDir: snapshot, practiceHome: true, mailProvider: { ready: false },
     identityProvider: async req => req.headers.cookie === 'synthetic=alice' ? alice : req.headers.cookie === 'synthetic=bob' ? bob : null,
     cloud: { defaults: { storageBytes: 32 * 1024 ** 2, dailyTrafficBytes: 1024 ** 2, monthlyTrafficBytes: 0 } },
   });
+  const {server,cloudLibrary}=practiceApp;
   const port = await listen(server), origin = `http://127.0.0.1:${port}`;
-  t.after(async () => { await stop(server); await new Promise(resolve => setTimeout(resolve, 100)); fs.rmSync(directory, { recursive: true, force: true }); });
+  t.after(async () => { await practiceApp.close(); await new Promise(resolve => setTimeout(resolve, 100)); fs.rmSync(directory, { recursive: true, force: true }); });
   const request = (route, user = 'alice', options = {}) => fetch(origin + route, { redirect: 'manual', ...options, headers: { Cookie: 'synthetic=' + user, ...options.headers } });
   assert.equal((await request('/', '')).headers.get('location'), '/auth/hub');
   assert.equal((await request('/api/cloud/me', '')).status, 401);

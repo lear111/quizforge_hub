@@ -1,0 +1,47 @@
+[Unit]
+Description=QuizForge Java Hub public catalogue test preview
+After=network.target
+
+[Service]
+Type=simple
+User=quizforge-java-test
+Group=quizforge-java-test
+WorkingDirectory=/opt/quizforge-hub-java-test/current
+ExecStart=/usr/bin/java -Xms32m -Xmx192m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=32m -XX:+UseSerialGC -XX:ActiveProcessorCount=2 -Djava.awt.headless=true -jar /opt/quizforge-hub-java-test/current/quizforge-hub.jar
+Environment=HUB_JAVA_BIND=127.0.0.1
+Environment=HUB_JAVA_PORT=4338
+Environment=HUB_JAVA_DATA_DIR=/var/lib/quizforge-hub-java-test
+Environment=HUB_COOKIE_NAME=qfh_java_test
+Environment=PUBLIC_ORIGIN=https://quizforge-test.treenewbee.cloud
+Environment=COOKIE_SECURE=1
+# Optional dedicated auth configuration, never reuse production secrets implicitly.
+EnvironmentFile=-/etc/quizforge-hub-java-test/auth.env
+Environment=TRUST_PROXY=true
+Environment=CLOUD_ENABLED=false
+Environment=ADMIN_ENABLED=true
+Environment=PRACTICE_BRIDGE_ENABLED=true
+Environment=PRACTICE_ADMIN_PORT=4324
+Environment=PRACTICE_ORIGIN=https://practice-test.treenewbee.cloud
+Environment=LOCAL_IMPORT_ENABLED=true
+Environment=HUB_DEVICE_CONNECT_ENABLED=true
+Environment=HUB_LOCAL_CLIENT_IMPORT_ENABLED=false
+Environment=SERVER_TOMCAT_THREADS_MAX=40
+Environment=SERVER_TOMCAT_THREADS_MIN_SPARE=4
+Environment=SERVER_TOMCAT_MAX_CONNECTIONS=128
+Environment=SERVER_TOMCAT_ACCEPT_COUNT=64
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/quizforge-hub-java-test
+UMask=0077
+MemoryHigh=384M
+MemoryMax=512M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

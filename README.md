@@ -1,141 +1,49 @@
 # QuizForge 题库广场
 
-QuizForge 的云端产品，融合题库广场与在线练习，沿用 Hub 的账户和登录系统；本地产品为 QuizForge。题库广场：**https://quizforge.treenewbee.cloud/**；在线练习：**https://practice.treenewbee.cloud/**。公共题库支持下载文件、唤醒本地 QuizForge 导入，以及下载到云端练习。
+QuizForge 的题库分享、统一账号和云端练习产品。Hub 后端采用 Java / Spring Boot，云端练习保留独立 Node 服务；生产站暂未切换，仍运行旧版本。
 
-云端是基于固定 Web 运行时的邀请制试用版本，已接通浏览器直连 AI 评分、公共/私人题库导入、空间与每日下载额度。2026-10-20 新增正式 [管理后台](docs/ADMIN.md)，入口为 `/admin/`，使用已明确授予管理员权限的 Hub 账号登录。完整浏览器及设备验收仍待完成。历史开发状态见 [云端实现清单](docs/CLOUD_IMPLEMENTATION.md)；线上服务不会因本地源码变更而自动更新。
+- 题库广场：<https://quizforge.treenewbee.cloud/>；云端练习：<https://practice.treenewbee.cloud/>。
+- Java 测试站：<https://quizforge-test.treenewbee.cloud/>；练习测试站：<https://practice-test.treenewbee.cloud/>。
+- 源码：<https://github.com/lear111/quizforge_hub>。仓库不包含真实账号、数据库、附件或密钥。
 
-刷题工作区按 Web 完整同步，主要差异保留在云端设置与账号存储适配。当前版本包含答题区、原生文件导入、单题编辑和统一题库列表；来源、旧数据合并及发布前检查见 [工作区同步说明](docs/WEB_WORKSPACE_SYNC.md)，线上版本与验证范围见 [部署记录](deploy/workspace-2026-10-21.md)。
+## 结构
 
-界面采用 QuizForge 原图标和浅紫配色，保留简洁的搜索、题库列表、上传和评论流程。源码仓库：https://github.com/lear111/quizforge_hub 。仓库不包含真实账号、数据库、附件或邮件密钥。
+| 目录 | 职责 |
+| --- | --- |
+| `java-hub/` | Spring Boot Hub：账号、题库、上传、审核、管理员、AI 余额与网关、客户端导入 |
+| `practice/`、`cloud/`、`admin/` | 独立 Node 练习服务、固定 Web 运行时适配和私有审核桥 |
+| `public/` | 练习服务使用的浏览器资源；Hub 页面在 Java 静态资源目录 |
+| `vendor/` | 经审阅的基础题型及固定内容覆盖 |
+| `scripts/`、`deploy/` | 构建、迁移副本、维护和测试部署 |
+| `test/fixtures/`、`test/helpers/` | 合成旧格式数据、固定接口样本和临时 Java 测试宿主 |
 
-## 运行
+题型执行与练习存储继续使用独立 Node 服务，保留现有 Web、Android、Extension API 和格式 3 `.qbank` 契约。Java Hub 不执行未经审核的拓展。
 
-使用 **Node.js 24.13 或更高的 24.x 版本**（使用 Node 内置 SQLite；该接口在 24.13 中仍有实验性提示）。无需安装 npm 依赖。
+Java Hub 可独立构建。完整云端练习还需从指定 Web 源码构建运行快照，并随部署包交付；运行快照不进入本仓库 Git。服务器无需保留完整 Web 仓库，Web 后续修改也不会自动更新已部署的练习空间。构建方法见[工作区同步说明](docs/WEB_WORKSPACE_SYNC.md)。
+
+## 开发启动
+
+需要 JDK 21+、Maven 3.6.3+；完整联调与练习服务需要 Node.js 24.13+ 的 24.x。Hub 本身不需要 npm 依赖。
 
 ```powershell
-cd C:\Users\wangg\OneDrive\Desktop\QuizForge\quizforge_hub
-node server.mjs
+.\Verify-Java-Hub.ps1
+.\Start-Java-Hub.ps1 -SkipBuild
 ```
 
-浏览器打开 `http://localhost:4318`。首次启动为真实空库，不附带虚构题库、评论或下载量。开发时可以执行 `node --watch server.mjs`。测试使用 `npm test`，只操作系统临时目录。
+默认打开 `http://127.0.0.1:4338/`，数据在 `java-hub/data-java/`，使用独立开发 Cookie；全新目录为空，不生成假账号或演示内容。启动在前台运行，Ctrl+C 关闭。构建后也可 `npm start`，该命令现在启动 Java，不再启动旧 Node Hub。
 
-## 已实现
+完整环境、独立练习服务、原数据副本和验证范围见 [Java 开发说明](java-hub/README.md)。不要直接把生产数据库交给开发进程。
 
-- 独立账号注册、登录、退出，昵称公开而邮箱不公开。
-- 管理后台“登录与注册”提供五个独立验证开关：登录／注册的邮箱或短信验证码、人机验证，以及注册邀请码。固定保留登录账号密码和注册用户名、账号、密码；修改后点击“保存并生效”。见 [登录注册管理说明](docs/AUTH_POLICY.md)。
-- 注册默认验证邮箱或中国大陆手机号其中一种并完成人机验证；手机通道默认关闭，配置阿里云 PNVS 短信认证后可用。原腾讯云 SES 邮箱流程保留。验证码均为 6 位 / 10 分钟 / 5 次尝试 / 一次使用。
-- 邮箱或手机号配合密码登录；在“我的分享 → 账号联系方式”可补绑另一种联系方式，保留账号 ID、已有设备授权与免费 AI 余额。配置、数据迁移及验收边界见 [手机验证说明](docs/PHONE_AUTH.md)。
-- 邮件发送额度存入 SQLite：邮箱 60 秒冷却、24 小时 5 次；IP 10 分钟 5 次、24 小时 20 次；全站滚动 24 小时最多 100 次。失败或超时也保留发送预留量。
-- 搜索题库名称、简介、标签，按最近更新 / 下载请求量排序，分页显示题库。首版不做分类。
-- 上传 ZIP、7Z、RAR、QBank 压缩包，填写名称、版本、简介、详细介绍和标签。
-- 最多 6 张 PNG / JPEG / WebP 截图，客户端预览、查看大图、编辑时保留或移除。
-- 作者编辑、替换附件、下架自己的题库；服务端验证每次编辑的所有者。
-- 匿名下载；服务端流式传输，客户端提供保存文件，展示 SHA-256 校验值。
-- 提交后待审核：管理员通过或填写原因驳回；仅已通过题库公开展示和下载。作者修改任何内容后重新送审。
-- 管理员审核列表、当前版本校验与审核记录；待审 / 驳回附件仅作者和管理员可访问。
-- 独立审核提醒邮箱、专用 SES 模板、持久化合并队列 / 15 分钟冷却 / 24 小时 24 次上限，失败延迟重试。
-- 登录用户评论、删除自己的评论、举报题库；管理员查看举报、删除不当评论、下架题库。
-- SQLite + 独立附件目录持久化，重启保留数据和登录会话。
-- 文件扩展名与文件头校验、大小与存储配额、请求限流、同源写入检查、HttpOnly 会话 Cookie、纯文本展示和 CSP。
-- 月度附件下载预算和每日单 IP 附件额度，SQLite 持久化预算；达到上限返回 429，保留页面浏览。
+## 功能与文档
 
-管理员必须通过服务器本地命令明确授予，首个注册用户不会自动成为管理员：
+原生迁移范围已覆盖题库浏览、搜索、格式 3 包目录、单本／部分导出、上传编辑、删除分享、评论举报、注册登录、验证策略、设备授权、管理员审核、不可变审核包、拓展白名单、活动和流量统计、公开联系方式、审核邮件队列、免费 AI 余额／兑换／上游管理和网关。充值仅保留按钮，不接支付。
 
-```text
-node scripts/admin.mjs promote 管理员邮箱
-node scripts/admin.mjs demote 管理员邮箱
-```
+- [迁移进度与验收边界](docs/JAVA_MIGRATION.md)
+- [账号、验证码与设备兼容](docs/JAVA_ACCOUNTS.md)
+- [详情目录与部分下载](docs/JAVA_PACK_DETAILS.md)、[上传编辑](docs/JAVA_PUBLISHING.md)
+- [管理、AI 和独立练习衔接](docs/JAVA_ADMIN_AI_PRACTICE.md)
+- [固定 Web 运行时构建与来源](docs/WEB_WORKSPACE_SYNC.md)
 
-登录后刷新，页面右上角出现“审核管理”入口。
+旧 Node Hub、旧页面及预览入口已从源码移除。旧格式兼容通过固定样本、Node 标准加密库和 Java／练习联调验证；不再保留可运行的旧 Hub。`Admin-Java-Hub.ps1` 提供 Java 本地维护命令，`scripts/admin.mjs` 仅转发相同命令到 Java。维护时必须明确指定数据目录，不启动网页或定时邮件任务。见[维护说明](docs/JAVA_MAINTENANCE.md)。既有 `deploy/` 记录描述其各自发布时点，不能据此推断本地改动已上线。
 
-首次升级审核版本，已有题库也会进入待审核，数据库和附件不会删除。管理员可下载文件检查并批准。审核通过不代表病毒扫描完成。
-
-## 配置
-
-注册邮件默认关闭，已有账号仍可登录。Windows 直接启动时自动读取当前用户的 `.codex/secrets/quizforge-hub/mail.env`，也可通过 `MAIL_ENV_FILE` 指定私有文件。Linux 使用 systemd 的 `/etc/quizforge-hub/mail.env`，示例见 `deploy/mail.env.example`。不要将真实密钥提交到源码、OneDrive 或公开静态目录。
-
-启用邮件发送需要腾讯云 SecretId / SecretKey、地域、发信地址、模板 ID、稳定的随机 `EMAIL_CODE_PEPPER`。人机验证独立需要真实的 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`，不接受测试密钥；默认注册同时要求两种验证，管理员可分别配置。确认配置与收信测试后，将 `TENCENT_SES_ENABLED` 设为 `1` 并重启。前端仅收到可用状态和公开站点键。
-
-Turnstile 站点允许域名应包含实际网站域名，本地验证时另加 `localhost` / `127.0.0.1`。开启相应人机验证时，后端强制校验 token、对应用途 action 和当前网站 hostname；验证服务异常时拒绝该请求。开启注册验证码时，账号插入和验证码消耗在同一 SQLite 事务中完成。既有账号请求注册验证码会收到一致的公开响应，但不会发送新邮件。
-
-发送次数按滚动 24 小时保守计数，避免零点前后突发翻倍；不自动重试或退还失败预留量。100 封上限可能被攻击者耗尽导致暂停注册，不能等同于腾讯云账单上限。保持 `EMAIL_CODE_PEPPER` 稳定，随数据库一起私密备份；更换该值会使待用验证码失效并改变邮件/IP限额的识别键。
-
-接入依据：[腾讯云 SendEmail](https://cloud.tencent.com/document/api/1288/51034)、[TC3 签名](https://cloud.tencent.com/document/api/213/30654)、[Turnstile 后端验证](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)。本机已完成真实 SES 邮件投递（用户确认收到），以及 localhost 上真实 Turnstile 控件 / token 后端验证。本地使用 localhost:4318；127.0.0.1 在当前小组件仍报未授权。公网 HTTPS、域名解析和注册配置已检查，服务器运行记录见 `deploy/seoul-deployment.md`。
-
-通过进程环境变量设置，无须把密钥放入代码。Linux / systemd 示例在 `deploy/`。
-
-| 变量 | 默认值 | 含义 |
-|---|---|---|
-| `HOST` | `127.0.0.1` | 默认仅监听本机，通过反向代理对外服务 |
-| `PORT` | `4318` | 服务端口 |
-| `DATA_DIR` | 项目下 `data` | 数据库、附件目录；不可放在公开静态目录中 |
-| `PUBLIC_ORIGIN` | 请求的本机 HTTP origin | 生产必须设置完整 HTTPS origin，例如 `https://hub.example.com`，不带末尾斜杠 |
-| `COOKIE_SECURE` | `0` | 本地 HTTP 为 0，生产 HTTPS 必须为 1 |
-| `INVITATION_REQUIRED` | `0` | 首次初始化邀请码验证开关；后续在管理后台“登录与注册”保存，重启保留管理员选择 |
-| `TRUST_PROXY` | `0` | 生产只有在 Node 端口不对外开放、反向代理覆盖 `X-Real-IP` 时才设为 1 |
-| `LOCAL_IMPORT_ENABLED` | `0` | 设为 1 开启公共 .qbank 本地唤醒与固定版本下载，独立于云端功能；当前设备需安装支持协议 v1 的 QuizForge 客户端 |
-| `MAX_ARCHIVE_MB` | `20` | 单个压缩包上限，MiB；调整时同步修改反向代理请求体限制 |
-| `USER_QUOTA_MB` | `500` | 单个上传者附件存储上限，MiB |
-| `TOTAL_QUOTA_MB` | `5000` | 所有题库附件存储总上限，MiB |
-| `MONTHLY_FILE_BUDGET_GB` | `150` | 月度附件传输预算，十进制 GB，截图和压缩包都计入 |
-| `IP_DAILY_FILE_MB` | `1000` | 单 IP 每日附件传输额度，MiB；多人共用网络会共享额度 |
-| `BILLING_TIMEZONE` | `Asia/Shanghai` | 月度预算的日历时区，按实际账期调整；每日 IP 额度按 UTC 日界线 |
-
-默认采用 150 GB 附件预算，为用户的腾讯云首尔服务器 200 GB/月套餐预留空间。**这不是云账单硬限额**：它不包含 HTML/JS/CSS、响应头、TLS 开销、其他站点、服务器更新、外部备份或其他网络传输，也不能代替云侧 DDoS 防护和账单告警。服务器有其他用途时，应进一步降低网站预算。
-
-预算在发送前按整个文件大小保守预留，中途断开也不会退回，因此可能提前达到预算。图片浏览器缓存命中不会请求服务器，也不会重复预留。反向代理必须关闭附件缓存，否则缓存返回会绕过应用的流量计数。下载量指已接受的下载请求数，不是已完成下载人数。
-
-## 下载到本地 QuizForge
-
-`LOCAL_IMPORT_ENABLED=1` 后，已审核公开 `.qbank` 的详情页提供“下载题库文件”“下载并导入到本地”，云端功能开启时还有“下载并导入到云端”。本地入口说明为“导入当前设备上的 QuizForge，支持电脑和安卓手机、平板。”；云端入口说明为“导入账号的云端题库，需登录。”。
-
-电脑和 Android 共用 `quizforge://hub/import?v=1&pack=<id>&revision=<revision>`，由当前设备系统唤起已安装的客户端，无需选择平台。链接只包含协议版本、小写题库 UUID 和正整数 Hub revision。客户端从官方 Hub 获取清单和固定版本附件，校验后导入。Hub 清单请求不计下载；二进制下载沿用站点/IP 预算与保守预留，原生公共下载不消耗云端个人存储或个人下载额度。
-
-点击后网页只显示“已请求打开 QuizForge，请在系统提示中允许打开”，不判断安装状态或宣称下载、导入成功。普通文件下载始终保留且不增加登录要求；ZIP、RAR、7Z 和未公开附件不提供直接导入。Windows 下载入口使用官方 GitHub Releases，Android 显示“安装包待发布”，待正式发布地址和签名确定后再配置，不猜测 APK 地址。
-
-应用仅支持包内 `formatVersion: 3` 的单题库包和分组包，旧格式 1、2 需制作者升级，与题目年份或题库自身版本号无关。原生客户端继续检查拓展能力，不能为一键导入放宽兼容范围。
-
-协议、错误码见 [导入协议 v1](docs/superpowers/specs/2026-10-20-hub-local-import-design.md)，本次入口调整与联合验收边界见 [Android 一键导入交接](docs/HUB_ANDROID_IMPORT.md)。此开关独立于云端刷题功能，默认关闭；源码或自动测试通过不代表已部署、已开启入口或完成实际浏览器、系统唤起提示和真机验收。
-
-## 公开上线前仍需完成
-
-当前版本适合本地验收及有限规模试用，**不能把通过功能测试等同于可无监管公开运营**。
-
-- 根据服务器位置、面向人群和运营方式落实备案、账号身份核验、评论管理、隐私政策和服务协议；普通邮箱注册没有身份核验功能。
-- 病毒扫描和上传资格管理。文件头检查与人工审核不能证明内容无害；压缩包不会在服务器解压或执行。
-- 密码找回、账号封禁、管理员审计记录、评论举报和举报处理状态；当前支持题库举报与人工下架、评论删除。
-- 外网 HTTPS、腾讯云实际流量 / 账单告警、反向代理连接数和请求限额、防爬与 DDoS 防护。应用内限流按单进程实现。
-- SQLite 与附件的异机备份及恢复演练、磁盘空间监测；系统与 Node 安全更新。
-- 对真实服务器上的 RAM、磁盘、并发及访问速度进行验收。当前只接受一个文件上传同时处理，上传表单在内存解析，默认请求体上限约 39 MiB。
-
-首版采用单进程 SQLite，本地磁盘存储，不具备多实例共享状态。不要启动多个服务进程共用附件目录；上传锁和限流不跨进程。多实例部署需要重新设计存储和配额。
-
-## 备份
-
-最简单的一致性备份方法：停止服务，复制整个 `DATA_DIR`（包括 `hub.sqlite`、存在的 WAL 文件和 `files/`），完成后再启动服务。不能只复制数据库而漏掉附件；不要在写入期间直接拷贝一个 SQLite 主文件。上线后应通过计划任务备份到另一台机器，并实际测试恢复。云快照可以辅助恢复，不替代异机备份。
-
-## 验证记录
-
-2026-10-10：首尔服务器 Node 24.21.0 上 17 项测试通过，覆盖上传下载、作者权限、评论举报、数据重启恢复、持久化流量预算、邮件额度与验证码、人机验证失败关闭，以及通过发布目录软链接启动。测试使用隔离数据；浏览器验收记录另存 `QA.md`。这不是安全审计或生产负载测试。
-
-附：早期流程创建过一个未发布的 Sites 项目，用户选择自有服务器后已停止该路径。其记录仅保存在忽略目录 `.openai/`，旧模板保存在 `.sites-runtime/unused-sites-starter/`；均不是当前运行所需文件，不会由 HTTP 服务提供。
-
-## 审核提醒邮件
-
-在私有环境文件设置 `REVIEW_EMAIL`（管理员收件地址）及 `TENCENT_SES_REVIEW_TEMPLATE_ID`（审核通过的提醒模板 ID），继续使用已有 SES 发件人和 SendEmail 权限。提醒内容模板见 `deploy/review-email-template.html`，应另建模板，不复用注册验证码模板。服务重启后会处理已有待审任务。
-
-邮件只提醒登录审核列表，不附加上传者填写的标题、正文或附件。新提交立即尝试提醒，15 分钟内合并，滚动 24 小时至多 24 次；发送失败也扣额度，30 分钟后重试。注册邮件仍沿用独立的 100 次上限，两者额度分别记录。模板尚未配置时上传仍正常，管理员页面显示配置未完成，待提醒任务保留。
-
-## 云端普通用户刷题入口
-
-普通用户刷题站现位于 [practice.treenewbee.cloud](https://practice.treenewbee.cloud/)，使用原 Hub 账号登录后直接进入基础题库。它使用独立数据目录；AI 评分通过用户浏览器直连其自填模型，API Key 留在本机。实现与验收边界见 `docs/CLOUD_IMPLEMENTATION.md`、`docs/CLOUD_QA_2026-10-19.md` 和 `docs/ADMIN.md`。
-
-## 题库广场入口
-
-网站根路径 `/` 直接显示题库广场；已有 `/manage/` 及 `/manage/#library` 链接继续有效，两者加载同一套页面和脚本。获取题库可使用 `https://quizforge.treenewbee.cloud/manage/#library`，原作答页面可保留。
-
-临时网盘提示页及其专用样式、复制脚本已移除。旧 `DOWNLOAD_NOTICE_ENABLED`、`DOWNLOAD_NOTICE_URL`、`DOWNLOAD_NOTICE_CODE` 不再读取，即使旧服务配置仍保留这些变量，也不会将首页切回提示页或因旧网盘地址阻止启动。入口调整不改变账号、登录、审核、数据目录和下载权限。
-
-Windows 客户端下载链接指向 [官方发布页](https://github.com/lear111/quizforge_web/releases)，不再依赖网站首页；Android 正式发布地址仍待确定。本轮是源码调整，未部署，不能据此判断线上已生效。
-
-切换前已将当前 SQLite 和全部附件一起备份至服务器私有备份目录，并下载到本机 `.codex/backups/quizforge-hub`（OneDrive 之外）。备份已实际解包，数据库完整性检查为 ok，2 个账号 / 2 份题库 / 4 个附件的大小与 SHA-256 校验通过。这是一次性备份，目前仍未配置定时异机备份。备份包含账号信息，不应上传到公开仓库或网盘分享目录。
+真实浏览器／手机、真实邮件短信／模型和生产切换仍须联合验收；自动用例通过不等于这些验收完成。源码不自动部署或发布安装包。

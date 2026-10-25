@@ -1,5 +1,7 @@
 # Hub 管理后台
 
+Java 分支的维护命令已迁 Java，当前启动、数据目录与操作方法以 [Java 维护说明](JAVA_MAINTENANCE.md) 为准。下文保留管理业务约定，旧 Node 部署路径仅描述其历史版本。
+
 入口：`https://quizforge.treenewbee.cloud/admin/`。右上角“管理后台”也可进入。没有登录时转到原 Hub 登录，普通用户不能访问管理数据。管理员仍由服务器上的 `scripts/admin.mjs promote` 明确授予。
 
 ## 功能
