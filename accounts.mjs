@@ -4,15 +4,6 @@ export const normalizePhone = value => {
   const local = value.trim().replace(/[ -]/g, '').replace(/^(?:\+86|86)(?=1\d{10}$)/, '');
   return /^1[3-9]\d{9}$/.test(local) ? '+86' + local : null;
 };
-export function loginContact(input) {
-  const entries = ['identifier', 'email', 'phone'].filter(key => input[key] !== undefined);
-  if (entries.length !== 1 || typeof input[entries[0]] !== 'string') return null;
-  const value = input[entries[0]].trim();
-  if (entries[0] !== 'phone' && value.length <= 180 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return { channel: 'email', value: value.toLowerCase() };
-  const phone = entries[0] !== 'email' && normalizePhone(value);
-  return phone ? { channel: 'phone', value: phone } : null;
-}
-
 export function initializeContacts(db) {
   // Rebuild only the legacy users table, without renaming its referenced name.
   // Keep IDs, sessions, foreign keys, AI balances and device token hashes intact.
@@ -36,18 +27,6 @@ export function initializeContacts(db) {
   db.exec('CREATE TABLE IF NOT EXISTS unverified_contacts(user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,channel TEXT NOT NULL,contact TEXT NOT NULL,PRIMARY KEY(user_id,channel))');
 }
 
-export function accountByContact(db, contact) {
-  return contact.channel === 'email' ? db.prepare('SELECT * FROM users WHERE email=?').get(contact.value)
-    : db.prepare('SELECT u.* FROM users u JOIN user_phones p ON p.user_id=u.id WHERE p.phone=?').get(contact.value);
-}
-export function accountProfile(db, id) {
-  const user = db.prepare('SELECT u.id,u.name,u.email,p.phone,u.admin FROM users u LEFT JOIN user_phones p ON p.user_id=u.id WHERE u.id=?').get(id);
-  if (user) {
-    const unverified = db.prepare('SELECT channel,contact FROM unverified_contacts WHERE user_id=?').all(id).filter(row => user[row.channel] === row.contact).map(row => row.channel);
-    if (unverified.length) user.unverifiedContacts = unverified;
-  }
-  return user;
-}
 export function setContactVerified(db, id, contact, verified, now = Date.now()) {
   if (!db.isTransaction) throw new Error('Contact verification must share the account transaction');
   if (verified) db.prepare('DELETE FROM unverified_contacts WHERE user_id=? AND channel=? AND contact=?').run(id, contact.channel, contact.value);

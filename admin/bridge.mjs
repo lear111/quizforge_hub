@@ -21,8 +21,9 @@ export function createAdminClient({ port = 4324 } = {}) {
   };
 }
 
-export function createPracticeAdminBridge({ library, authenticate, hubPort = 4318, onAdminError, reviews: suppliedReviews }) {
+export function createPracticeAdminBridge({ library, authenticate, hubPort = 4338, hubCookieName = 'qfh_session', onAdminError, reviews: suppliedReviews }) {
   if (!library) throw new Error('Practice administration requires the pinned library runtime');
+  if (!Number.isInteger(hubPort) || hubPort < 1 || hubPort > 65535 || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(hubCookieName)) throw new Error('Invalid Hub identity endpoint');
   const { db, accounts } = library, reviews = suppliedReviews || new ReviewPackages(library);
   const sync = user => {
     if (!validHubIdentity(user)) throw new CloudError(503, 'Hub 用户信息无效');
@@ -40,7 +41,7 @@ export function createPracticeAdminBridge({ library, authenticate, hubPort = 431
       if (!url.pathname.startsWith('/internal/admin/')) throw new CloudError(404, '管理接口不存在');
       const target = async id => {
         if (!uuid(id)) throw new CloudError(400, '用户编号无效');
-        const response = await fetch(`http://127.0.0.1:${hubPort}/api/admin/users/${id}/profile`, { headers: { Cookie: 'qfh_session=' + token }, redirect: 'error', signal: AbortSignal.timeout(5000) });
+        const response = await fetch(`http://127.0.0.1:${hubPort}/api/admin/users/${id}/profile`, { headers: { Cookie: hubCookieName + '=' + token }, redirect: 'error', signal: AbortSignal.timeout(5000) });
         if (!response.ok) throw new CloudError(response.status, '无法核实接收用户');
         const { user } = await response.json(); return sync(user);
       };

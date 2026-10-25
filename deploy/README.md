@@ -1,5 +1,7 @@
 # 自有服务器部署
 
+> 以下为旧 Node Hub 的历史部署说明，对应原生产版本。当前 Java 源码的启动与测试部署见 [Java 说明](../java-hub/README.md)和[Java 测试部署记录](java-test-complete-2026-10-25.md)。本页及 `quizforge-hub.service` 中的旧 `server.mjs` 命令不能用于当前 Java 源码；合并主分支不会自动切换服务器。
+
 2026-10-10 已通过 `work-codex-seoul` 部署至腾讯云首尔 Ubuntu 24.04 服务器。实际使用独立 Node 24.21.0、systemd 和已有 Caddy，域名为 `quizforge.treenewbee.cloud`。服务与目录记录见 `seoul-deployment.md`。下面的步骤用于维护或迁移；`nginx.conf` 仍是未启用的参考模板。
 
 1. 上传 `server.mjs`、`mail.mjs`、`email-codes.mjs`、`review-notifications.mjs`、`package.json`、`public/` 和 `scripts/admin.mjs` 到 `/opt/quizforge-hub/releases/<发布编号>`，`/opt/quizforge-hub/current` 指向当前发布。当前没有 npm 依赖，不需上传 `node_modules`、本地 `data/`、`.sites-runtime/`、`.openai/` 或测试数据。

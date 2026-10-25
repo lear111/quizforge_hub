@@ -7,12 +7,12 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { createApp } from '../server.mjs';
+import {createPracticeApp as createApp} from '../practice/server.mjs';
+import {javaHost} from './helpers/java-host.mjs';
 import { createHubSource, hubImportTarget, importReturnPath } from '../cloud/hub-source.mjs';
 
 const snapshot = (process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url))), id = '11111111-1111-4111-8111-111111111111';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-const stop = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
 test('cloud import target only accepts a bank and revision, with no external login redirect', () => {
   const query = `pack=${id}&revision=3`; assert.deepEqual(hubImportTarget(query), { packId: id, revision: 3 }); assert.equal(importReturnPath('/cloud/import?' + query), '/cloud/import?' + query);
   for (const input of ['https://evil.example', '//evil.example', '/cloud/import?'+query+'&next=https://evil.example', '/cloud/import?pack='+id+'&pack='+id+'&revision=3', '/cloud/import?pack='+id+'&revision=01']) assert.throws(() => importReturnPath(input));
@@ -34,10 +34,10 @@ test('Hub downloader rejects changed hashes, oversize manifests and redirects; i
   await assert.rejects(source(id, 3), /另一份/); await result.close(); assert.deepEqual(await fs.readdir(path.join(directory, 'hub-downloads')), []);
 });
 
-test('two real Hub instances import a format 3 bank via pinned download, preserve ownership and quota, deduplicate and reject unpublished revisions', { skip: !existsSync(snapshot) }, async t => {
+test('Java Hub and the independent practice service import a format 3 bank via pinned download, preserve ownership and quota, deduplicate and reject unpublished revisions', { skip: !existsSync(snapshot)||!process.env.HUB_JAVA_JAR }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'qfh-cross-hub-')), hubDir = path.join(root, 'hub'), practiceDir = path.join(root, 'practice');
-  const hub = await createApp({ dataDir: hubDir, localImportEnabled: true, mailProvider: { ready: false } });
-  await new Promise(resolve => hub.server.listen(0, '127.0.0.1', resolve)); const hubOrigin = `http://127.0.0.1:${hub.server.address().port}`;
+  const hub=await javaHost({dataDir:hubDir,localImport:true}),hubOrigin=hub.origin;
+  t.after(()=>hub.close());
   const db = new DatabaseSync(path.join(hubDir, 'hub.sqlite')), packId = randomUUID(), fileId = randomUUID(), owner = randomUUID();
   db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?)').run(owner, 'source@example.test', '合成作者', 'not-login', 0, new Date().toISOString());
   db.prepare("INSERT INTO packs(id,user_id,title,summary,description,category,tags,version,created,updated,status,revision) VALUES(?,?,?,'test','test','','[]','1',?,?,'approved',3)").run(packId, owner, '基础示例', new Date().toISOString(), new Date().toISOString());
@@ -47,7 +47,7 @@ test('two real Hub instances import a format 3 bank via pinned download, preserv
   const alice = { id, email: 'alice@example.test', name: '合成用户', admin: 0 }, bob = { id: randomUUID(), email: 'bob@example.test', name: '另一用户', admin: 0 };
   const practice = await createApp({ dataDir: practiceDir, cloudEnabled: true, cloudRuntimeDir: snapshot, practiceHome: true, resolveCloudPack: source, mailProvider: { ready: false }, identityProvider: async req => req.headers.cookie === 'test=alice' ? alice : req.headers.cookie === 'test=bob' ? bob : null });
   await new Promise(resolve => practice.server.listen(0, '127.0.0.1', resolve)); const origin = `http://127.0.0.1:${practice.server.address().port}`;
-  t.after(async () => { await Promise.all([stop(hub.server), stop(practice.server)]); db.close(); await fs.rm(root, { recursive: true, force: true }); });
+  t.after(async () => { await practice.close(); db.close(); await fs.rm(root, { recursive: true, force: true }); });
   const request = (route, user = 'alice', input, customOrigin = origin) => fetch(origin + route, { redirect: 'manual', ...(input ? { method: 'POST', body: JSON.stringify(input) } : {}), headers: { Cookie: 'test='+user, Origin: customOrigin, 'Content-Type': 'application/json' } });
   const route = '/api/cloud/library/from-hub', input = { packId, revision: 3 };
   assert.equal((await request(route, '', input)).status, 401); assert.equal((await request(route, 'alice', input, 'https://evil.example')).status, 403);

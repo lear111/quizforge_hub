@@ -14,8 +14,9 @@ function cookie(req, name) {
 // Sessions and the original Hub credential remain in process memory only. A
 // restart repeats the short Hub sign-in handoff; no production DB is opened.
 export class HubLogin {
-  constructor({ practiceOrigin, hubOrigin, authPort = 4318, now = Date.now, secure = true }) {
-    this.practice = new URL(practiceOrigin); this.hub = new URL(hubOrigin); this.authPort = authPort; this.now = now; this.secure = secure;
+  constructor({ practiceOrigin, hubOrigin, authPort = 4338, cookieName = 'qfh_session', now = Date.now, secure = true }) {
+    if (!Number.isInteger(authPort) || authPort < 1 || authPort > 65535 || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(cookieName)) throw new Error('Invalid Hub authentication endpoint');
+    this.practice = new URL(practiceOrigin); this.hub = new URL(hubOrigin); this.authPort = authPort; this.cookieName = cookieName; this.now = now; this.secure = secure;
     this.pending = new Map(); this.codes = new Map(); this.sessions = new Map(); this.starts = new Map();
   }
   sweep() {
@@ -25,7 +26,7 @@ export class HubLogin {
   async identity(token) {
     if (!opaque(token)) return null;
     const result = await fetch(`http://127.0.0.1:${this.authPort}/api/me`, {
-      headers: { Cookie: 'qfh_session=' + token }, redirect: 'error', signal: AbortSignal.timeout(5000),
+      headers: { Cookie: this.cookieName + '=' + token }, redirect: 'error', signal: AbortSignal.timeout(5000),
     });
     if (!result.ok) throw new CloudError(503, 'Hub 登录服务暂时不可用，请稍后重试');
     const { user } = await result.json();
@@ -57,7 +58,7 @@ export class HubLogin {
       if (url.pathname !== '/practice-auth/authorize') throw new CloudError(404, '页面不存在');
       const request = url.searchParams.get('request'), pending = opaque(request) && this.pending.get(request);
       if (!pending) return send(400, '<!doctype html><meta charset="utf-8"><title>登录已过期</title><p>登录请求已过期。</p><a href="' + this.practice.origin + '/auth/hub">返回刷题页重新登录</a>');
-      const token = cookie(req, 'qfh_session'), user = await this.identity(token);
+      const token = cookie(req, this.cookieName), user = await this.identity(token);
       if (!user) return redirect(`${this.hub.origin}/manage/#practice-login/${request}`);
       if (this.codes.size >= 10000) throw new CloudError(503, '登录请求较多，请稍后重试');
       if (pending.code) this.codes.delete(pending.code);
@@ -91,7 +92,7 @@ export class HubLogin {
       if (req.method !== 'POST' || req.headers.origin !== this.practice.origin) throw new CloudError(403, '请求来源无效');
       const token = cookie(req, '__Host-qfh_practice'), session = token && this.sessions.get(hash(token));
       if (session) {
-        const response = await fetch(`http://127.0.0.1:${this.authPort}/api/auth/logout`, { method: 'POST', headers: { Cookie: 'qfh_session=' + session.hubToken, Origin: this.hub.origin }, redirect: 'error', signal: AbortSignal.timeout(5000) });
+        const response = await fetch(`http://127.0.0.1:${this.authPort}/api/auth/logout`, { method: 'POST', headers: { Cookie: this.cookieName + '=' + session.hubToken, Origin: this.hub.origin }, redirect: 'error', signal: AbortSignal.timeout(5000) });
         if (!response.ok) throw new CloudError(503, '暂时未能退出 Hub，请稍后重试');
         await response.body?.cancel(); this.sessions.delete(hash(token));
       }
