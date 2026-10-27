@@ -7,9 +7,9 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import {createPracticeApp as createApp} from '../practice/server.mjs';
+import {createPracticeApp as createApp} from '../practice/server/app.mjs';
 import {javaHost} from './helpers/java-host.mjs';
-import { createHubSource, hubImportTarget, importReturnPath } from '../cloud/hub-source.mjs';
+import { createHubSource, hubImportTarget, importReturnPath } from '../practice/server/cloud/hub-source.mjs';
 
 const snapshot = (process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url))), id = '11111111-1111-4111-8111-111111111111';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');

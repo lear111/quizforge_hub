@@ -2,7 +2,7 @@
 
 Java 原生 Hub 已补齐账号、题库发布管理、审核、AI 与练习内部接口的代码迁移。独立 Node 练习与规则运行时继续保留。旧 Node Hub 后端、页面和过时预览入口已删除；兼容验证只保留合成旧数据、固定接口样本及真实 Java／练习联调。
 
-生产站未切换。完整进度见[迁移清单](../docs/JAVA_MIGRATION.md)，账号兼容见[账号说明](../docs/JAVA_ACCOUNTS.md)，管理／AI／练习配置见[衔接说明](../docs/JAVA_ADMIN_AI_PRACTICE.md)。
+2026-10-27 正式站已切换到 Java Hub，独立 Node 练习服务同时更新。正式数据在服务器上停写复制、逐表核对后启用，原 Node 数据保留供恢复审查；见[正式发布记录](../deploy/production-20261027.md)。完整进度见[迁移清单](../docs/JAVA_MIGRATION.md)，账号兼容见[账号说明](../docs/JAVA_ACCOUNTS.md)，管理／AI／练习配置见[衔接说明](../docs/JAVA_ADMIN_AI_PRACTICE.md)。
 
 ## 开发与启动
 
@@ -11,7 +11,7 @@ Java 原生 Hub 已补齐账号、题库发布管理、审核、AI 与练习内�
 在仓库根目录执行：
 
 ```powershell
-.\Verify-Java-Hub.ps1
+.\scripts\Verify-Java-Hub.ps1
 .\Start-Java-Hub.ps1 -SkipBuild
 ```
 
@@ -82,18 +82,18 @@ AI 接通原 AES-256-GCM 配置、兑换码、余额、账本、设备网关和�
 
 `PRACTICE_BRIDGE_ENABLED=true`、准确的 `PRACTICE_ORIGIN` 与 Node 服务的 `HUB_AUTH_PORT` / `HUB_SESSION_COOKIE` 必须一致。不要让 Java 与 Node 同时写同一个 Hub 数据目录。细节及默认值见[衔接说明](../docs/JAVA_ADMIN_AI_PRACTICE.md)。
 
-仍须完成真实浏览器／手机、真实验证码与邮件／模型、生产完整数据副本、容量和切换恢复演练；未提交、推送、合并或切换生产。浏览器工具受 Work 设置限制时，HTTP 检查不能代替视觉与设备验收。
+正式数据副本、停写备份、切换及失败回退已在 2026-10-27 发布中验证；真实浏览器／手机、真实验证码与邮件／模型及完整容量验收仍需单独记录，不能用 HTTP 检查代替视觉、设备或供应商调用。
 
-本轮测试站完整部署、数据核对与回退见[部署记录](../deploy/java-test-complete-2026-10-25.md)。
+本轮测试站完整部署、数据核对与回退见[部署记录](../deploy/archive/java-test-complete-2026-10-25.md)。
 
 ## 测试
 
-`Verify-Java-Hub.ps1` 先运行 Java 测试和 JAR 构建，再显式给 Node 对照测试设置 `HUB_JAVA_JAR`；测试使用独立临时数据、随机回环端口，结束时停止所创建的 Java／Node 服务。Node 侧需要当前项目原有的 Node.js 24。
+`scripts/Verify-Java-Hub.ps1` 先运行 Java 测试和 JAR 构建，再显式给 Node 对照测试设置 `HUB_JAVA_JAR`；测试使用独立临时数据、随机回环端口，结束时停止所创建的 Java／Node 服务。Node 侧需要当前项目原有的 Node.js 24。
 
-清理前的迁移发布通过 Java65 项和 Node迁移联调44项。本轮维护命令迁移后，Java73项通过；当前完整验证以 `Verify-Java-Hub.ps1` 及清理记录为准。AI 使用合成上游和加密样本，不调用真实付费模型；浏览器／手机与供应商验收另记。
+清理前的迁移发布通过 Java65 项和 Node迁移联调44项。本轮维护命令迁移后，Java73项通过；当前完整验证以 `scripts/Verify-Java-Hub.ps1` 及清理记录为准。AI 使用合成上游和加密样本，不调用真实付费模型；浏览器／手机与供应商验收另记。
 
-完整验证必须提供经审阅的练习运行时：`Verify-Java-Hub.ps1 -PracticeRuntime <目录>`。本机优先使用 `.runtime/web-java-migration-20261025`，否则回退 `.runtime/web-current`；缺少 `basic-demo.qbank` 会直接失败。运行时构建见 `scripts/stage-web-workspace.mjs`，需要 Web 仓库固定来源和依赖。不要把 Windows 运行时部署到 Linux。
+完整验证必须提供经审阅的练习运行时：从仓库根目录运行 `scripts/Verify-Java-Hub.ps1 -PracticeRuntime <目录>`。本机优先使用 `.runtime/web-java-migration-20261025`，否则回退 `.runtime/web-current`；缺少 `basic-demo.qbank` 会直接失败。运行时构建见 `scripts/stage-web-workspace.mjs`，需要 Web 仓库固定来源和依赖。不要把 Windows 运行时部署到 Linux。
 
-`Verify-Java-Hub.ps1` 现在执行完整 Java 构建和全部 Node 练习／页面／协议回归。旧后端专属测试合并到对应 Java 测试；旧格式由 `test/fixtures/` 的固定数据验证，详见[测试映射](../docs/JAVA_TESTING.md)。`npm test` 只运行 Node 侧；未设置 `HUB_JAVA_JAR` 或缺少运行时导致跳过的结果不能算完整迁移通过。
+`scripts/Verify-Java-Hub.ps1` 现在执行完整 Java 构建和全部 Node 练习／页面／协议回归。旧后端专属测试合并到对应 Java 测试；旧格式由 `test/fixtures/` 的固定数据验证，详见[测试映射](../docs/JAVA_TESTING.md)。`npm test` 只运行 Node 侧；未设置 `HUB_JAVA_JAR` 或缺少运行时导致跳过的结果不能算完整迁移通过。
 
 管理员角色、邀请码、登录恢复、赠送额度和安装包清单维护已迁为 Java，见[维护命令](../docs/JAVA_MAINTENANCE.md)。

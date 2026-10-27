@@ -1,10 +1,10 @@
 import path from 'node:path';
-import { createPracticeApp as createApp } from '../practice/server.mjs';
-import { HubLogin } from '../cloud/hub-login.mjs';
-import { CloudError } from '../cloud/accounts.mjs';
-import { createHubSource, hubImportTarget } from '../cloud/hub-source.mjs';
-import { createPracticeAdminBridge } from '../admin/bridge.mjs';
-import { createAdminContactSource } from '../cloud/admin-contact.mjs';
+import { createPracticeApp as createApp } from '../practice/server/app.mjs';
+import { HubLogin } from '../practice/server/cloud/hub-login.mjs';
+import { CloudError } from '../practice/server/cloud/accounts.mjs';
+import { createHubSource, hubImportTarget } from '../practice/server/cloud/hub-source.mjs';
+import { createPracticeAdminBridge } from '../practice/server/admin/bridge.mjs';
+import { createAdminContactSource } from '../practice/server/cloud/admin-contact.mjs';
 
 if (!process.env.DATA_DIR || path.basename(path.resolve(process.env.DATA_DIR)) !== 'quizforge-hub-practice') throw new Error('Dedicated practice data directory required');
 // The test server sets these to its own -test domains; production uses the defaults.

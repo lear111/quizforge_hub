@@ -53,6 +53,20 @@ public class PackModerationService {
             else update(c,"UPDATE pack_cloud_approvals SET status='revoked' WHERE pack_id=?",id);
             audit(c,actor,"pack-"+decision,id,detail);return Map.of("ok",true);});
     }
+    /** Administrator uploads publish in place; unknown code still needs explicit confirmation. */
+    public Object publishOwnUpload(String id,long revision,boolean codeReviewed,Object actor,String token){
+        var p=db.read(c->{current(c,actor);var value=pack(c,id);if(!Objects.equals(value.get("user_id"),actor))throw new HubException(403,"只能发布自己上传的题库");return value;});
+        if(number(p.get("revision"))!=revision)throw new HubException(409,"题库已更新，请重新打开后发布");
+        if("approved".equals(p.get("status")))return Map.of("state","published");
+        if(String.valueOf(p.get("filename")).toLowerCase(Locale.ROOT).endsWith(".qbank")){
+            var inspection=(Map<String,Object>)inspect(id,actor,token);
+            var item=(Map<String,Object>)inspection.get("item");
+            if(!codeReviewed&&(!(item.get("extensions") instanceof List<?> extensions)||extensions.isEmpty()||extensions.stream().anyMatch(raw->!(raw instanceof Map<?,?> e)||!"approved".equals(e.get("status")))))
+                return Map.of("state","code-review-required","item",item);
+        }
+        decision(id,Map.of("decision","approved","revision",revision,"codeReviewed",true,"reason","管理员上传并发布"),actor,token);
+        return Map.of("state","published");
+    }
     public Object unpublish(String id,Map<String,Object> input,Object actor){String note=reason(input);return db.transaction(c->{current(c,actor);var p=pack(c,id);update(c,"UPDATE packs SET status='rejected',review_note=?,reviewed_by=?,reviewed_at=? WHERE id=?",note,actor,Instant.now().toString(),id);update(c,"UPDATE pack_cloud_approvals SET status='revoked' WHERE pack_id=?",id);audit(c,actor,"pack-unpublished",id,Map.of("revision",p.get("revision"),"reason",note));return Map.of("ok",true);});}
     public void revokeAffected(Object actor,Map<String,Object> states){
         var approved=new HashSet<String>();for(Object raw:(List<?>)states.get("entries")){var e=(Map<?,?>)raw;if("approved".equals(e.get("status")))approved.add(String.valueOf(e.get("digest")));}

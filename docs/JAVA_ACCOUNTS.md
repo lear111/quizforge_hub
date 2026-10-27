@@ -1,11 +1,11 @@
 # Java 账号与设备授权迁移
 
-2026-10-25，Java 迁移第二阶段。实现位于 `java-hub/src/main/java/cloud/treenewbee/quizforge/hub/account/`，浏览器入口位于 `java-hub/src/main/resources/static/account-ui.mjs`。总体进度见 [迁移计划](JAVA_MIGRATION.md)。
+2026-10-25，Java 迁移第二阶段。实现位于 `java-hub/src/main/java/cloud/treenewbee/quizforge/hub/account/`，浏览器入口位于 `java-hub/src/main/resources/static/account-ui.mjs`。总体进度见 [迁移计划](./JAVA_MIGRATION.md)。
 
 ## 用户流程
 
 - 原生 Java 提供邮箱／中国大陆手机号注册、密码登录、退出、补绑另一种联系方式、用户中心、设备授权与管理。
-- 用户中心使用已确认原型的账户信息／设备／侧栏布局和既有手机断点，绑定表单按需展开。真实资料与设备接入；余额查询及兑换已接真实账本，充值保留占位。[布局补齐与部署记录](../deploy/java-test-profile-ui-2026-10-25.md)。
+- 用户中心使用已确认原型的账户信息／设备／侧栏布局和既有手机断点，绑定表单按需展开。真实资料与设备接入；余额查询及兑换已接真实账本，充值保留占位。[布局补齐与部署记录](../deploy/archive/java-test-profile-ui-2026-10-25.md)。
 - 登录／注册验证码和人机验证沿用独立开关；默认注册仍要求验证码及人机验证，服务缺失时拒绝，不为演示自动关掉。邀请码开关从旧 `registration_policy` 读取，环境变量只给新库设置初值。
 - 账号资料使用稳定 `users.id`。补绑不创建第二个账号，不覆盖旧邮箱／手机号，不合并账号；余额、设备与题库引用不变。
 - 充值保留禁用按钮；发布、审核、AI 网关／兑换和练习 SSO 属于后续阶段。`/api/connect/redeem` 在有效设备认证后返回 501 `FEATURE_NOT_MIGRATED`，不会假装充值或兑换成功。
@@ -51,16 +51,16 @@
 - `TENCENT_SES_ENABLED`、`TENCENT_SECRET_ID`、`TENCENT_SECRET_KEY`、`TENCENT_SES_FROM`、`TENCENT_SES_TEMPLATE_ID`、`TENCENT_SES_REGION`、`EMAIL_CODE_PEPPER`：沿用 Node 邮件配置；region限香港／广州，摘要密钥至少32字符。
 - `ALIYUN_SMS_ENABLED`、`ALIYUN_SMS_ACCESS_KEY_ID`、`ALIYUN_SMS_ACCESS_KEY_SECRET`、`ALIYUN_SMS_SIGN_NAME`、`ALIYUN_SMS_TEMPLATE_CODE`、`SMS_CODE_PEPPER`、`SMS_DAILY_LIMIT`：沿用阿里云PNVS配置；默认每日100次发送预留上限。
 - `TURNSTILE_SITE_KEY`、`TURNSTILE_SECRET_KEY`：按hostname及action校验；测试key前缀不视为已配置。页面仅在配置后加载固定Cloudflare脚本，CSP按需允许该固定来源。
-- `HUB_DEVICE_CONNECT_ENABLED=1`：可在迁移测试中单独开启设备协议；默认关闭。迁移副本原 `official_ai_config.enabled=1` 时沿用设备入口，AI开关及可用上游配置控制真实调用，见[管理与AI衔接](JAVA_ADMIN_AI_PRACTICE.md)。此开关不授予任意网络、额外账号或管理员权限。
+- `HUB_DEVICE_CONNECT_ENABLED=1`：可在迁移测试中单独开启设备协议；默认关闭。迁移副本原 `official_ai_config.enabled=1` 时沿用设备入口，AI开关及可用上游配置控制真实调用，见[管理与AI衔接](./JAVA_ADMIN_AI_PRACTICE.md)。此开关不授予任意网络、额外账号或管理员权限。
 
 发码只访问固定腾讯SES、阿里PNVS及Cloudflare HTTPS接口，无Cookie、无重定向、无应用重试；总等待期限10秒，响应上限64KiB，保留系统TLS验证。不把供应商诊断、验证码、令牌或私钥写入日志、API或测试证据。
 
 ## 验证边界
 
-`Verify-Java-Hub.ps1` 运行Java检查、构建及Node／Java HTTP互认；其中包含旧密码及Cookie、新密码回到Node、迁移前验证码一次消费、旧设备与余额、签名固定样例、验证策略组合、政策并发更新、邀请码争用、设备重放与撤销。供应商用合成数据或模拟投递验证；没有调用真实邮件、短信、Turnstile或付费模型。
+`scripts/Verify-Java-Hub.ps1` 运行Java检查、构建及Node／Java HTTP互认；其中包含旧密码及Cookie、新密码回到Node、迁移前验证码一次消费、旧设备与余额、签名固定样例、验证策略组合、政策并发更新、邀请码争用、设备重放与撤销。供应商用合成数据或模拟投递验证；没有调用真实邮件、短信、Turnstile或付费模型。
 
-2026-10-25按用户选择，将旧Node测试站完整数据复制到Java测试站；39张原表、5个文件及6个账号的身份／题库归属校验通过，旧密码摘要与ID保留。当前测试验证策略继承旧库，发码及摘要密钥未复制；独立Cookie需要重新登录。详见[数据迁移记录](../deploy/java-test-data-migration-2026-10-25.md)。这不是当前正式站的数据迁移。
+2026-10-25按用户选择，将旧Node测试站完整数据复制到Java测试站；39张原表、5个文件及6个账号的身份／题库归属校验通过，旧密码摘要与ID保留。当前测试验证策略继承旧库，发码及摘要密钥未复制；独立Cookie需要重新登录。详见[数据迁移记录](../deploy/archive/java-test-data-migration-2026-10-25.md)。这不是当前正式站的数据迁移。
 
 浏览器工具当前受Work设置限制。模板、HTTP和协议结果不能代替真实浏览器、手机收码或Android系统回调验收。完整练习接口已实现并联调，正式数据副本与生产切换仍待后续。
 
-实现依据：[Bouncy Castle SCrypt](https://downloads.bouncycastle.org/java/docs/bcprov-jdk18on-javadoc/org/bouncycastle/crypto/generators/SCrypt.html)、[JDK21 HttpClient](https://docs.oracle.com/en/java/javase/21/docs/api/java.net.http/java/net/http/HttpClient.html)、原 [登录策略](AUTH_POLICY.md)、[手机号验证](PHONE_AUTH.md)及[设备协议v1](HUB_CONNECT_AI.md)。
+实现依据：[Bouncy Castle SCrypt](https://downloads.bouncycastle.org/java/docs/bcprov-jdk18on-javadoc/org/bouncycastle/crypto/generators/SCrypt.html)、[JDK21 HttpClient](https://docs.oracle.com/en/java/javase/21/docs/api/java.net.http/java/net/http/HttpClient.html)、原 [登录策略](./AUTH_POLICY.md)、[手机号验证](./PHONE_AUTH.md)及[设备协议v1](./HUB_CONNECT_AI.md)。

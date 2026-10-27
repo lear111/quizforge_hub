@@ -23,7 +23,7 @@ import static cloud.treenewbee.quizforge.hub.storage.HubDatabase.*;
 @Service
 public class PackPublishingService {
     private static final long MIB=1048576;
-    private static final Set<String> FIELDS=Set.of("title","summary","description","version","tags","rights","keepScreenshots","revision");
+    private static final Set<String> FIELDS=Set.of("title","summary","description","version","tags","rights","keepScreenshots","revision","codeReviewed");
     private final HubDatabase db;
     private final CatalogService catalog;
     private final Path directory;
@@ -85,8 +85,11 @@ public class PackPublishingService {
             for(var part:fileParts)additions.add(store(part,written));
             String id=packId==null?UUID.randomUUID().toString():packId,owner=user.get("id").toString(),finalVersion=version;
             int expectedRevision=revision;
+            boolean[] administrator={false};
             var removed=db.transaction(c->{
-                if(row(c,"SELECT u.id FROM users u WHERE u.id=? AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE b.user_id=u.id)",owner)==null)throw new HubException(401,"账号不可用，请重新登录");
+                var freshUser=row(c,"SELECT u.id,u.admin FROM users u WHERE u.id=? AND NOT EXISTS(SELECT 1 FROM user_blocks b WHERE b.user_id=u.id)",owner);
+                if(freshUser==null)throw new HubException(401,"账号不可用，请重新登录");
+                administrator[0]=number(freshUser.get("admin"))!=0;
                 Map<String,Object> previous=packId==null?null:owned(c,id,owner);
                 if(previous!=null&&number(previous.get("revision"))!=expectedRevision)throw new HubException(409,"题库已被修改，请重新打开编辑页后再提交");
                 var old=rows(c,"SELECT * FROM files WHERE pack_id=?",id);
@@ -104,12 +107,14 @@ public class PackPublishingService {
                 for(var f:deleted)update(c,"DELETE FROM files WHERE id=?",f.get("id"));
                 for(var f:additions)update(c,"INSERT INTO files VALUES(?,?,?,?,?,?,?)",f.id,id,f.kind,f.name,f.mime,f.size,f.sha);
                 // Preserve the legacy durable review queue. Delivery is a later migration module.
-                update(c,"UPDATE review_mail_state SET generation=generation+1 WHERE id=1");
+                if(!administrator[0])update(c,"UPDATE review_mail_state SET generation=generation+1 WHERE id=1");
                 return deleted;
             });
             committed=true;
             for(var file:removed){String key=String.valueOf(file.get("id"));if(key.matches(CatalogService.ID))try{Files.deleteIfExists(directory.resolve(key));}catch(IOException ignored){/* Unreferenced immutable file; do not turn a committed save into a failure. */}}
-            return catalog.detail(id,user);
+            var result=new LinkedHashMap<String,Object>(catalog.detail(id,user));
+            if(administrator[0])result.put("adminUpload",Map.of("codeReviewed","yes".equals(fields.get("codeReviewed"))));
+            return result;
         } finally {
             if(!committed)for(var file:written)try{Files.deleteIfExists(file);}catch(IOException ignored){}
             slot.release();

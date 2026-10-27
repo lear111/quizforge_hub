@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { extensionDigest } from '../cloud/extension-review.mjs';
+import { extensionDigest } from '../practice/server/cloud/extension-review.mjs';
 import { stageCloudBasicContent, copyCloudDependencies } from './cloud-runtime-content.mjs';
 
 const repo = path.resolve(fileURLToPath(new URL('..', import.meta.url)));

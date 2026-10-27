@@ -8,8 +8,8 @@ import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { DatabaseSync } from 'node:sqlite';
-import { CloudAccounts } from '../cloud/accounts.mjs';
-import { CloudLibrary, treeBytes } from '../cloud/library.mjs';
+import { CloudAccounts } from '../practice/server/cloud/accounts.mjs';
+import { CloudLibrary, treeBytes } from '../practice/server/cloud/library.mjs';
 
 const snapshot = process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-20261023-coast-verified', import.meta.url));
 const oldSnapshot = process.env.QFH_TEST_OLD_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url));
@@ -74,7 +74,7 @@ test('native workspace import, Hub import and admin delivery share the Web list,
 test('answer areas use trusted complete images, preserve drafts on failed saves, isolate resources and freeze history', { skip: !enabled }, async t => {
   const f = await fixture(t), lib = f.library, item = await lib.ensureDemo(alice), base = '/api/collections/bank/' + item.banks[0].id, q = base + '/questions/answer-area-information-flow';
   const provider = item.extensions.find(row => row.extensionId === 'quizforge.short-answer-area');
-  const page = await f.api(item, `/api/extensions/${provider.id}/${provider.version}/page`); assert.equal(page.answerAreaComponent.version, '1.4.1'); assert.equal(page.answerAreasDeclared, true);
+  const page = await f.api(item, `/api/extensions/${provider.id}/${provider.version}/page`); assert.equal(page.answerAreaComponent.version, '1.4.2'); assert.equal(page.answerAreasDeclared, true);
   const area = { type: 'qf-answer-area', formatVersion: 1, id: 'response-answer', width: 760, height: 1800, text: '输入光线，处理图像信号，输出照片。', strokes: [] };
   const answer = value => ({ responses: { answer: value } });
   const saved = await f.action(item, q, 'draft', { answer: answer(area) }); assert.equal(saved.state.status, 'draft');
@@ -108,7 +108,7 @@ test('answer areas use trusted complete images, preserve drafts on failed saves,
   await f.action(item, q, 'review', { review: { targetId: 'answer', score: 4.5 } });
   const summary = await f.api(item, base + '/summary'), finished = await f.api(item, base + '/finish', { requestId: randomUUID(), roundId: summary.roundId, summaryVersion: summary.summaryVersion });
   const history = await f.api(item, base + '/history/' + finished.historyId);
-  assert.match(JSON.stringify(history), /1\.4\.1/); assert.match(JSON.stringify(history), new RegExp(id));
+  assert.match(JSON.stringify(history), /1\.4\.2/); assert.match(JSON.stringify(history), new RegExp(id));
   const removed = await f.api(item, '/api/library/manage', { kind: 'bank', target: 'item', action: 'delete', path: item.banks[0].path });
   assert.equal(removed.catalog.banks.length, 0);
   assert.deepEqual(await f.api(item, base + '/history/' + finished.historyId), history);
@@ -204,19 +204,44 @@ test('runtime upgrade preserves an existing customized demo, saved answers and f
   const fresh = await f.library.ensureDemo(bob); assert.equal(fresh.extensions.find(row => row.extensionId === 'quizforge.short-answer-area').version, '1.0.5');
 });
 
+test('synced listening audio is scoped to its bank and owner; ruled paper survives normal cloud saves and history', { skip: !enabled }, async t => {
+  const f=await fixture(t),item=await f.library.ensureDemo(alice),root=f.library.location(alice,item.id);
+  const bankFile=path.join(root,'question-banks',item.banks[0].path,'bank.json'),bank=JSON.parse(fs.readFileSync(bankFile));
+  const audio=Buffer.alloc(46);audio.write('RIFF');audio.writeUInt32LE(38,4);audio.write('WAVEfmt ',8);audio.writeUInt32LE(16,16);audio.writeUInt16LE(1,20);audio.writeUInt16LE(1,22);audio.writeUInt32LE(8000,24);audio.writeUInt32LE(16000,28);audio.writeUInt16LE(2,32);audio.writeUInt16LE(16,34);audio.write('data',36);audio.writeUInt32LE(2,40);
+  const media=path.join(path.dirname(bankFile),'media');fs.mkdirSync(media);fs.writeFileSync(path.join(media,'sample.wav'),audio);
+  bank.listening={materials:[{id:'sample',title:'合成听力材料',file:'media/sample.wav'}],examMaterialId:'sample'};
+  bank.questions[0].listening={materialId:'sample'};fs.writeFileSync(bankFile,JSON.stringify(bank));
+  const base='/api/collections/bank/'+item.banks[0].id,collection=await f.api(item,base);
+  assert.equal(collection.questions[0].listening.materialId,'sample');
+  const heard=await f.raw(item,base+'/listening/sample');assert.equal(heard.status,200);assert.equal(heard.type,'audio/wav');assert.deepEqual(heard.bytes,audio);
+  await assert.rejects(f.raw(item,base+'/listening/sample',undefined,bob),/不存在/);
+  const q=base+'/questions/'+bank.questions[0].id;
+  const draft={schemaVersion:1,viewport:{x:0,y:0,zoom:1},paper:{color:'#ffffff',pattern:'ruled'},strokes:[{id:'ink',color:'#334155',width:3,points:[{x:40,y:73,pressure:.5}]}]};
+  await f.action(item,q,'whiteboard',{draft});
+  const session=f.library.practice.sessions.get(item.id);await session.close();f.library.practice.sessions.delete(item.id);
+  assert.deepEqual((await f.api(item,q)).draft,draft);
+  const summary=await f.api(item,base+'/summary'),finished=await f.api(item,base+'/finish',{requestId:randomUUID(),roundId:summary.roundId,summaryVersion:summary.summaryVersion});
+  const history=await f.api(item,base+'/history/'+finished.historyId);
+  assert.deepEqual(history.questions.find(row=>row.payload.question.id===bank.questions[0].id).payload.draft,draft);
+});
+
 test('workspace module graph and controls follow pinned Web, with only cloud settings and transport adapters', { skip: !enabled }, async t => {
   const f = await fixture(t), lib = f.library, item = await lib.ensureDemo(alice), base = '/cloud/practice/' + item.id + '/';
   const asset = name => lib.practice.asset(alice, item.id, name, { ordinary: true }).bytes.toString();
+  assert.match(asset('listening/listening-player.js'),/悬浮听力播放器/);
+  assert.match(asset('draft/whiteboard.js'),/<option value="ruled">横线<\/option>/);
+  assert.match(asset('app.js'),/refreshCatalog\(\{openFallback:false\}\)/);
+  assert.throws(() => asset('shared/answer-area/1.4.2/component.js'),/不存在/,'Components are injected through the scoped API, not exposed as arbitrary shared files');
   const html = asset('index.html'), upstream = fs.readFileSync(path.join(snapshot, 'core/web/index.html'), 'utf8');
-  const lock = JSON.parse(fs.readFileSync(new URL('../deploy/web-workspace-20261023.json', import.meta.url))), inventory = new Map(lib.runtime.manifest.inventory.map(row => [row.path, row.sha256]));
+  const lock = JSON.parse(fs.readFileSync((process.env.QFH_TEST_SOURCE_LOCK || new URL('../practice/vendor/locks/web-workspace-20261027-network.json', import.meta.url)))), inventory = new Map(lib.runtime.manifest.inventory.map(row => [row.path, row.sha256]));
   for (const row of lock.inventory) assert.equal(inventory.get(row.path), row.sha256, row.path);
   for (const id of ['library-import', 'library-import-dialog', 'library-import-file', 'library-manage-dialog']) {
     assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1);
     assert.equal((upstream.match(new RegExp(`id="${id}"`, 'g')) || []).length, 1);
   }
-  const cloud = fs.readFileSync(new URL('../public/cloud/library.js', import.meta.url), 'utf8');
+  const cloud = fs.readFileSync(new URL('../practice/public/cloud/library.js', import.meta.url), 'utf8');
   assert.doesNotMatch(cloud, /切换|createElement\('dialog'\)|cloud-library-open/);
-  const css = fs.readFileSync(new URL('../public/cloud/experience.css', import.meta.url), 'utf8'); assert.doesNotMatch(css, /#library-import\s*\{[^}]*display\s*:\s*none/);
+  const css = fs.readFileSync(new URL('../practice/public/cloud/experience.css', import.meta.url), 'utf8'); assert.doesNotMatch(css, /#library-import\s*\{[^}]*display\s*:\s*none/);
   assert.match(html, /返回编辑/); assert.match(asset('editor/editor-navigation.js'), /UNSAVED_EDITOR_CHANGES/); assert.doesNotMatch(asset('app.js'), /onCapture/);
   assert.throws(() => asset('draft/whiteboard-capture.js'), /不存在/);
   assert.throws(() => asset('server/host/http/server.js'), /不存在/);
@@ -227,7 +252,7 @@ test('workspace module graph and controls follow pinned Web, with only cloud set
     for (const match of source.matchAll(/(?:from\s*|import\s*\(?\s*)['"]([^'"\n]+\.(?:js|css))['"]/g)) {
       const specifier = match[1];
       if (specifier.startsWith(base)) { queue.push(specifier.slice(base.length)); continue; }
-      if (specifier.startsWith('/cloud/')) { assert.ok(fs.existsSync(new URL('../public' + specifier, import.meta.url))); continue; }
+      if (specifier.startsWith('/cloud/')) { assert.ok(fs.existsSync(new URL('../practice/public' + specifier, import.meta.url))); continue; }
       if (!specifier.startsWith('.')) continue;
       const url = new URL(specifier, 'https://practice.example' + base + file);
       assert.ok(url.pathname.startsWith(base), url.pathname); queue.push(url.pathname.slice(base.length));

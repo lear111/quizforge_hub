@@ -10,10 +10,10 @@ import {once} from 'node:events';
 import {randomBytes,randomUUID,createHash,createCipheriv,createDecipheriv} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {fileURLToPath} from 'node:url';
-import {createPracticeApp as createApp} from '../practice/server.mjs';
-import {HubLogin} from '../cloud/hub-login.mjs';
-import {createPracticeAdminBridge} from '../admin/bridge.mjs';
-import {loadRuntime} from '../cloud/runtime.mjs';
+import {createPracticeApp as createApp} from '../practice/server/app.mjs';
+import {HubLogin} from '../practice/server/cloud/hub-login.mjs';
+import {createPracticeAdminBridge} from '../practice/server/admin/bridge.mjs';
+import {loadRuntime} from '../practice/server/cloud/runtime.mjs';
 
 const jar=process.env.HUB_JAVA_JAR,runtimePath=process.env.QFH_TEST_RUNTIME||fileURLToPath(new URL('../.runtime/web-current',import.meta.url));
 const listen=server=>new Promise(resolve=>server.listen(0,'127.0.0.1',()=>resolve(server.address().port)));
@@ -52,6 +52,18 @@ test('Java moderation uses retained Node practice review snapshots, whitelist an
     assert.equal((await request('/api/admin/packs/'+pack.id+'/decision',{decision:'approved',reason:'synthetic',revision:1})).status,400);
     await json(await request('/api/admin/packs/'+pack.id+'/decision',{decision:'approved',reason:'synthetic review completed',revision:1,codeReviewed:true}));
     assert.equal((await request('/api/packs/'+pack.id,undefined,null)).status,200);const check=new DatabaseSync(path.join(data,'hub.sqlite'));assert.equal(check.prepare('SELECT status FROM pack_cloud_approvals WHERE pack_id=?').get(pack.id).status,'approved');assert.equal(check.prepare('SELECT COUNT(*) n FROM pack_reviews WHERE pack_id=?').get(pack.id).n,1);check.close();
+  });
+  await t.test('administrator uploads known code directly and confirms new code without leaving the upload flow',async()=>{
+    const upload=async(buffer,reviewed=false)=>{const data=new FormData();for(const [key,value] of Object.entries({title:'Administrator synthetic',summary:'Synthetic only',description:'Synthetic administrator publication',version:'1.0',rights:'yes'}))data.set(key,value);if(reviewed)data.set('codeReviewed','yes');data.set('archive',new Blob([buffer]),'admin-synthetic.qbank');const response=await fetch(origin+'/api/packs',{method:'POST',headers:{Origin:publicOrigin,Cookie:'qfh_java_test='+people.admin.token},body:data});assert.equal(response.status,201,await response.clone().text());return response.json();};
+    const control=new DatabaseSync(path.join(data,'hub.sqlite'));const queued=()=>control.prepare('SELECT generation FROM review_mail_state WHERE id=1').get().generation;const before=queued();
+    try{
+      const known=await upload(bytes);assert.equal(known.pack.status,'approved');assert.equal(known.publication.state,'published');assert.equal(queued(),before);
+      await fs.appendFile(path.join(extensions[0],manifest.rules),'\n// new code revision for confirmation');const modified=path.join(root,'admin-modified.qbank');await archive.zip(content,modified);
+      const unknown=await upload(await fs.readFile(modified));assert.equal(unknown.pack.status,'pending');assert.equal(unknown.publication.state,'code-review-required');assert.equal((await request('/api/packs/'+unknown.pack.id,undefined,null)).status,404);
+      const done=await json(await request('/api/packs/'+unknown.pack.id+'/publish',{revision:unknown.pack.revision,codeReviewed:true}));assert.equal(done.pack.status,'approved');assert.equal(queued(),before);
+      const receipt=control.prepare('SELECT revision,sha256,status FROM pack_cloud_approvals WHERE pack_id=?').get(done.pack.id);assert.equal(receipt.revision,done.pack.revision);assert.equal(receipt.sha256,done.pack.archive.sha256);assert.equal(receipt.status,'approved');
+      for(const value of [known,done])assert.equal((await request('/api/packs/'+value.pack.id,undefined,null)).status,200);
+    }finally{control.close();}
   });
   await t.test('private delivery resolves a phone-only recipient through Java before their first practice visit',async()=>{
     const recipient=randomUUID(),phone='+8613800138000',control=new DatabaseSync(path.join(data,'hub.sqlite'));

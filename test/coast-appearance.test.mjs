@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { ordinaryPracticeAsset } from '../cloud/practice-ui.mjs';
+import { ordinaryPracticeAsset } from '../practice/server/cloud/practice-ui.mjs';
 
 const runtime = process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-20261023-coast-verified', import.meta.url));
 const enabled = fs.existsSync(path.join(runtime, 'snapshot.json'));
@@ -29,10 +29,10 @@ test('cloud coast defaults preserve existing image preferences and report the We
 });
 test('coast illustration, theme controls and visible settings icon ship together through the cloud adapter', { skip: !enabled }, () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(runtime, 'snapshot.json')));
-  const lock = JSON.parse(fs.readFileSync(new URL('../deploy/web-workspace-20261023.json', import.meta.url)));
+  const lock = JSON.parse(fs.readFileSync((process.env.QFH_TEST_SOURCE_LOCK || new URL('../practice/vendor/locks/web-workspace-20261027-network.json', import.meta.url))));
   assert.equal(manifest.sourceRevision, lock.sourceRevision); assert.equal(manifest.includesWorkingTree, true);
   assert.deepEqual(manifest.sourceOverrides, lock.overrides.map(({ path, sha256 }) => ({ path, sha256 })));
-  assert.equal(manifest.sourceLockSha256, createHash('sha256').update(fs.readFileSync(new URL('../deploy/web-workspace-20261023.json', import.meta.url))).digest('hex'));
+  assert.equal(manifest.sourceLockSha256, createHash('sha256').update(fs.readFileSync((process.env.QFH_TEST_SOURCE_LOCK || new URL('../practice/vendor/locks/web-workspace-20261027-network.json', import.meta.url)))).digest('hex'));
   const css = ordinaryPracticeAsset('shell/themes.css', read('shell/themes.css'), base);
   assert.match(css, new RegExp(base + '/assets/backgrounds/coast\\.svg')); assert.doesNotMatch(css, /url\("\/assets\//);
   assert.match(read('shell/network-settings.css'), /network-settings-entry[^}]*background:#ffffffc7/); assert.match(read('shell/network-settings.css'), /stroke-width:1\.8/);

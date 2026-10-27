@@ -13,6 +13,12 @@ import org.springframework.beans.factory.annotation.*;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.*;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import cloud.treenewbee.quizforge.hub.admin.PracticeAdminClient;
+import cloud.treenewbee.quizforge.hub.common.HubException;
+import java.util.concurrent.atomic.AtomicReference;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
 import tools.jackson.databind.json.JsonMapper;
 import cloud.treenewbee.quizforge.hub.account.AccountCrypto;
 import cloud.treenewbee.quizforge.hub.config.HubProperties;
@@ -28,10 +34,11 @@ class PackPublishingHttpTest {
     static final JsonMapper JSON=JsonMapper.builder().build();
     @DynamicPropertySource static void data(DynamicPropertyRegistry registry){registry.add("hub.data-dir",DIRECTORY::toString);}
     @Autowired HubDatabase db;@Autowired HubProperties properties;@Value("${local.server.port}") int port;
+    @MockitoBean PracticeAdminClient bridge;
     final HttpClient client=HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     String owner,other,admin,cookie,otherCookie,adminCookie;
     record FilePart(String field,String name,byte[] value){}
-    @BeforeEach void seed(){owner=account(false);other=account(false);admin=account(true);cookie=cookie(owner);otherCookie=cookie(other);adminCookie=cookie(admin);}
+    @BeforeEach void seed(){reset(bridge);owner=account(false);other=account(false);admin=account(true);cookie=cookie(owner);otherCookie=cookie(other);adminCookie=cookie(admin);}
     String account(boolean admin){String id=UUID.randomUUID().toString();db.transaction(c->{update(c,"INSERT INTO users VALUES(?,?,?,?,?,?)",id,id+"@example.test","合成账号","!not-a-password",admin?1:0,Instant.now().toString());return null;});return id;}
     String cookie(String user){String raw=AccountCrypto.token();db.transaction(c->{update(c,"INSERT INTO sessions VALUES(?,?,?)",AccountCrypto.sha(raw),user,System.currentTimeMillis()+3600000);return null;});return properties.cookieName()+"="+raw;}
     Map<String,String> fields(){var values=new LinkedHashMap<String,String>();values.put("title","合成题库 <tag>");values.put("summary","合成简介");values.put("description","第一行\n第二行");values.put("version","1.0");values.put("tags","测试,Java");values.put("rights","yes");return values;}
@@ -49,6 +56,38 @@ class PackPublishingHttpTest {
     HttpResponse<byte[]> get(String path,String cookie)throws Exception{var request=HttpRequest.newBuilder(URI.create(base()+path));if(cookie!=null)request.header("Cookie",cookie);return client.send(request.build(),HttpResponse.BodyHandlers.ofByteArray());}
     long fileCount()throws IOException{try(var files=Files.list(DIRECTORY.resolve("files"))){return files.count();}}
     long queue(){return db.read(c->number(row(c,"SELECT generation FROM review_mail_state WHERE id=1").get("generation")));}
+    void reviewBridge(String status){
+        String submission=UUID.randomUUID().toString(),digest="a".repeat(64);
+        var item=new AtomicReference<Map<String,Object>>(Map.of("id",submission,"status","pending","extensions",List.of(Map.of("digest",digest,"status",status,"name","合成拓展","files",List.of()))));
+        when(bridge.call(eq("/submissions"),eq("POST"),isNull(),any(Path.class),anyString(),anyMap(),anyString())).thenAnswer(i->Map.of("item",item.get()));
+        when(bridge.call(eq("/submissions/"+submission),anyString())).thenAnswer(i->Map.of("item",item.get()));
+        when(bridge.send(eq("/submissions/"+submission+"/decision"),anyMap(),anyString())).thenAnswer(i->{item.set(Map.of("id",submission,"status","approved","extensions",List.of(Map.of("digest",digest,"status","approved"))));return Map.of("item",item.get());});
+    }
+    HttpResponse<byte[]> publish(String id,int revision,boolean reviewed,String cookie)throws Exception{
+        var request=HttpRequest.newBuilder(URI.create(base()+"/api/packs/"+id+"/publish")).header("Origin",base()).header("Cookie",cookie).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(Map.of("revision",revision,"codeReviewed",reviewed)))).build();return client.send(request,HttpResponse.BodyHandlers.ofByteArray());
+    }
+    @Test void administratorUploadsAndEditsPublishKnownExtensionsWithoutReviewNotifications()throws Exception{
+        reviewBridge("approved");long queued=queue();var created=upload(null,fields(),List.of(archive()),adminCookie,base());var p=pack(created);String id=p.get("id").toString();
+        assertEquals("approved",p.get("status"));assertEquals(admin,p.get("reviewed_by"));assertEquals(queued,queue());assertEquals(200,get("/api/packs/"+id,null).statusCode());
+        assertEquals("approved",db.read(c->row(c,"SELECT status FROM pack_cloud_approvals WHERE pack_id=?",id).get("status")));
+        var input=fields();input.put("revision","1");input.put("title","管理员更新");assertEquals("approved",pack(upload(id,input,List.of(),adminCookie,base())).get("status"));assertEquals(queued,queue());
+    }
+    @Test void administratorConfirmsUnknownCodeInPlaceAndPublishingIsIdempotent()throws Exception{
+        reviewBridge("unknown");long queued=queue();var response=upload(null,fields(),List.of(archive()),adminCookie,base());var p=pack(response);String id=p.get("id").toString();
+        assertEquals("pending",p.get("status"));assertEquals("code-review-required",JSON.readTree(response.body()).path("publication").path("state").asText());assertEquals(404,get("/api/packs/"+id,null).statusCode());assertEquals(queued,queue());
+        assertEquals(403,publish(id,1,true,cookie).statusCode());assertEquals(409,publish(id,2,true,adminCookie).statusCode());
+        assertEquals("code-review-required",JSON.readTree(publish(id,1,false,adminCookie).body()).path("publication").path("state").asText());
+        assertEquals("approved",pack(publish(id,1,true,adminCookie)).get("status"));assertEquals("approved",pack(publish(id,1,true,adminCookie)).get("status"));
+        assertEquals(1L,(long)db.read(c->number(row(c,"SELECT COUNT(*) n FROM pack_reviews WHERE pack_id=?",id).get("n"))));assertEquals(queued,queue());
+    }
+    @Test void uploadCodeConfirmationDoesNotGrantOrdinaryUsersPublicationRights()throws Exception{
+        var input=fields();input.put("codeReviewed","yes");long queued=queue();assertEquals("pending",pack(upload(null,input,List.of(archive()),cookie,base())).get("status"));assertEquals(queued+1,queue());verifyNoInteractions(bridge);
+    }
+    @Test void administratorCanConfirmCodeDuringUploadAndUnavailableBridgeKeepsSavedFiles()throws Exception{
+        reviewBridge("unknown");var input=fields();input.put("codeReviewed","yes");assertEquals("approved",pack(upload(null,input,List.of(archive()),adminCookie,base())).get("status"));
+        reset(bridge);when(bridge.call(eq("/submissions"),eq("POST"),isNull(),any(Path.class),anyString(),anyMap(),anyString())).thenThrow(new HubException(503,"合成审核服务不可用"));
+        long queued=queue();var response=upload(null,fields(),List.of(archive()),adminCookie,base());var p=pack(response);assertEquals("pending",p.get("status"));assertEquals("not-published",JSON.readTree(response.body()).path("publication").path("state").asText());assertEquals(queued,queue());assertTrue(Files.exists(DIRECTORY.resolve("files").resolve(((Map<?,?>)p.get("archive")).get("id").toString())));
+    }
     @Test void createsPendingImmutableFilesAndAnonymousCannotReadAnyPart()throws Exception{
         long queued=queue();var response=upload(null,fields(),List.of(archive(),image("截图.png")),cookie,base());assertEquals(201,response.statusCode());var pack=pack(response);String id=pack.get("id").toString();assertEquals("pending",pack.get("status"));assertEquals(1,((Number)pack.get("revision")).intValue());assertEquals(queued+1,queue());
         var archive=(Map<String,Object>)pack.get("archive");assertEquals(HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(zip())),archive.get("sha256"));assertArrayEquals(zip(),Files.readAllBytes(DIRECTORY.resolve("files").resolve(archive.get("id").toString())));

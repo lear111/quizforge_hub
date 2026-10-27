@@ -1,0 +1,49 @@
+# Imported only inside quizforge-test.treenewbee.cloud. Never import globally.
+@sharedMedia path /shared-media /shared-media/*
+handle @sharedMedia {
+    route {
+        header {
+            Access-Control-Allow-Origin "*"
+            Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+            Access-Control-Allow-Headers "Range"
+            Access-Control-Expose-Headers "Accept-Ranges, Content-Length, Content-Range, ETag, Last-Modified"
+            Cross-Origin-Resource-Policy "cross-origin"
+            X-Content-Type-Options "nosniff"
+            Referrer-Policy "no-referrer"
+            Cache-Control "no-store"
+        }
+        @preflight method OPTIONS
+        respond @preflight "" 204
+        @write not method GET HEAD
+        header @write Allow "GET, HEAD, OPTIONS"
+        respond @write "Method not allowed" 405
+        @audio path_regexp sharedAudio ^/shared-media/audio/[0-9a-f]{64}\.(mp3|wav|ogg|m4a)$
+        handle @audio {
+            root * /var/lib/quizforge-shared-media-test
+            uri strip_prefix /shared-media
+            @present file {
+                try_files {path}
+            }
+            handle @present {
+                @mp3 path *.mp3
+                header @mp3 Content-Type audio/mpeg
+                @wav path *.wav
+                header @wav Content-Type audio/wav
+                @ogg path *.ogg
+                header @ogg Content-Type audio/ogg
+                @m4a path *.m4a
+                header @m4a Content-Type audio/mp4
+                # Missing files are already rejected. Exclude requests that may return 412/416.
+                @complete {
+                    not header Range *
+                    not header If-Match *
+                    not header If-Unmodified-Since *
+                }
+                header @complete Cache-Control "public, max-age=31536000, immutable"
+                file_server
+            }
+            respond "Not found" 404
+        }
+        respond "Not found" 404
+    }
+}

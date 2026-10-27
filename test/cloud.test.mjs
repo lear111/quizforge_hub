@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { CloudAccounts } from '../cloud/accounts.mjs';
+import { CloudAccounts } from '../practice/server/cloud/accounts.mjs';
 
 function accounting(t, options = {}) {
   const db = new DatabaseSync(':memory:');
