@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { hubAccount, hubRedeem, hubComplete, officialFailure } from '../cloud/hub-ai.mjs';
+import { hubAccount, hubRedeem, hubComplete, officialFailure } from '../practice/server/cloud/hub-ai.mjs';
 
 const relay = responses => {
   const calls = [];

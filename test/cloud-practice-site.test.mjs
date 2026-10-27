@@ -6,9 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { createPracticeApp as createApp } from '../practice/server.mjs';
-import { HubLogin } from '../cloud/hub-login.mjs';
-import { ordinaryPracticeAsset } from '../cloud/practice-ui.mjs';
+import { createPracticeApp as createApp } from '../practice/server/app.mjs';
+import { HubLogin } from '../practice/server/cloud/hub-login.mjs';
+import { ordinaryPracticeAsset } from '../practice/server/cloud/practice-ui.mjs';
 
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
 const stop = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
@@ -118,8 +118,13 @@ test('ordinary cloud home creates the basic bank once per user, keeps private st
   assert.equal((await request(pageUrl, 'bob')).status, 404);
   assert.equal((await request(pageUrl, '')).headers.get('location'), '/auth/hub');
   assert.equal((await request(pageUrl + 'favicon.ico')).status, 200);
-  const manifest = await (await request(pageUrl + 'manifest.webmanifest')).json(); assert.match(manifest.description, /云端/);
-  for (const icon of manifest.icons) assert.equal((await request(icon.src)).status, 200);
+  const manifestUrl = html.match(/<link rel="manifest" href="([^"]+)"/)[1];
+  assert.equal(manifestUrl, '/cloud/pwa/manifest.webmanifest');
+  const manifestResponse = await request(manifestUrl, ''); assert.equal(manifestResponse.status, 200);
+  const manifest = await manifestResponse.json(); assert.match(manifest.description, /云端/);
+  assert.equal(manifest.start_url, '/'); assert.equal(manifest.scope, '/'); assert.equal(manifest.display, 'standalone');
+  for (const icon of manifest.icons) { assert.match(icon.src, /^\/cloud\/pwa\/icons\//); assert.equal((await request(icon.src, '')).status, 200); }
+  assert.equal((await request(pageUrl + 'manifest.webmanifest', '')).status, 303);
   const adapted = await (await request(pageUrl + 'app.js')).text(); assert.match(adapted, /bindCloudExperience/); assert.doesNotMatch(adapted, /bindNetworkSettings\(|bindDevelopmentSettings\(|bindAiSettings\(/);
   const appearance = await (await request(pageUrl + 'shell/appearance.js')).text(); assert.match(appearance, /DEFAULT_DIM=15/); assert.match(appearance, /green:0,coast:65,image:70/);
   const themes = await (await request(pageUrl + 'shell/themes.css')).text(); assert.match(themes, new RegExp(pageUrl + 'assets/backgrounds/dawn-lake.svg'));
@@ -159,7 +164,7 @@ test('ordinary cloud home creates the basic bank once per user, keeps private st
   const download = await request('/api/cloud/library/' + item.id + '/export'); assert.equal(download.status, 200); await download.arrayBuffer();
   assert.ok((await (await request('/api/cloud/me')).json()).usage.dailyTrafficBytes > 0);
   const jsFile = path.join(directory, 'adapted-app.mjs'); fs.writeFileSync(jsFile, adapted); execFileSync(process.execPath, ['--check', jsFile]);
-  for (const [file, content] of [['appearance.mjs', appearance], ['settings.mjs', fs.readFileSync(new URL('../public/cloud/experience.js', import.meta.url))]]) { fs.writeFileSync(path.join(directory, file), content); execFileSync(process.execPath, ['--check', path.join(directory, file)]); }
+  for (const [file, content] of [['appearance.mjs', appearance], ['settings.mjs', fs.readFileSync(new URL('../practice/public/cloud/experience.js', import.meta.url))]]) { fs.writeFileSync(path.join(directory, file), content); execFileSync(process.execPath, ['--check', path.join(directory, file)]); }
   const transfer = await (await request(pageUrl + 'library/library-transfer.js')).text(); assert.match(transfer, /downloadCloudSelection/); assert.match(transfer, /export-selection/);
   fs.writeFileSync(path.join(directory, 'transfer.mjs'), transfer); execFileSync(process.execPath, ['--check', path.join(directory, 'transfer.mjs')]);
   cloudLibrary.unifiedWorkspace = false; const legacy = await cloudLibrary.demo(alice.id); cloudLibrary.unifiedWorkspace = true;

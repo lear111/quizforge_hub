@@ -6,9 +6,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { DatabaseSync } from 'node:sqlite';
-import { CloudAccounts } from '../cloud/accounts.mjs';
-import { CloudLibrary } from '../cloud/library.mjs';
-import { gradeDirect, testGradingModel } from '../public/cloud/vault.js';
+import { CloudAccounts } from '../practice/server/cloud/accounts.mjs';
+import { CloudLibrary } from '../practice/server/cloud/library.mjs';
+import { gradeDirect, testGradingModel } from '../practice/public/cloud/vault.js';
 
 const snapshot = (process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url)));
 const alice = '11111111-1111-4111-8111-111111111111', bob = '22222222-2222-4222-8222-222222222222';
@@ -73,6 +73,10 @@ test('automatic multi-target grading, explicit retry, image inputs and exam hand
   const f=await fixture(t), raw=JSON.parse(fs.readFileSync(path.join(snapshot,'basic-content/question-banks/基础题型/基础题型展示/bank.json')));
   const material=raw.questions.find(q=>q.id==='short-sample-material'), responses=Object.fromEntries(material.data.parts.map(p=>[p.id,doc('合成测试作答')])), q=f.base+'/questions/'+material.id;
   const submitted=await f.submit(q,responses,'auto'); assert.equal(submitted.cloudAiPending.length,material.data.parts.length);
+  assert.equal(submitted.cloudAiStates.length,material.data.parts.length);
+  assert.deepEqual(submitted.cloudAiStates.map(row=>row.task.targetId).sort(),material.data.parts.map(part=>part.id).sort());
+  for(const row of submitted.cloudAiStates){assert.equal(row.route,q);assert.equal(row.task.status,'queued');assert.equal(Object.hasOwn(row.task,'snapshot'),false);assert.equal(Object.hasOwn(row.task,'gradingInput'),false);}
+  const duplicate=await f.start(q,material.data.parts[0].id);assert.ok(submitted.cloudAiPending.some(task=>task.taskId===duplicate.taskId));
   for(const task of submitted.cloudAiPending){const lease=await f.claim(task);assert.equal((await f.api('/api/cloud-ai/result',f.result(task,lease,1))).status,'confirmed');}
   const saved=await f.api(q); assert.equal(Object.keys(saved.state.result.aiAssessments).length,material.data.parts.length); assert.equal(saved.state.result.score,material.data.parts.length);
   const target=material.data.parts[0].id, task=await f.start(q,target), lease=await f.claim(task);

@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {createHash,randomUUID} from 'node:crypto';
 import http from 'node:http';
-import {initializeContacts,validHubIdentity,syncHubIdentity} from '../accounts.mjs';
-import {HubLogin} from '../cloud/hub-login.mjs';
-import {hubAccount} from '../cloud/hub-ai.mjs';
+import {initializeContacts,validHubIdentity,syncHubIdentity} from '../practice/server/accounts.mjs';
+import {HubLogin} from '../practice/server/cloud/hub-login.mjs';
+import {hubAccount} from '../practice/server/cloud/hub-ai.mjs';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 
 test('practice synchronizes phone-only identities and leaves ownership on the stable user ID',()=>{

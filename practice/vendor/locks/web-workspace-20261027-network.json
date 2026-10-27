@@ -1,0 +1,1178 @@
+{
+  "schemaVersion": 2,
+  "sourceRevision": "4522bb81c2126a699fcf72ce61d074dbc1264161",
+  "includesWorkingTree": true,
+  "overrideRoot": "practice/vendor/web-sync-20261027-network",
+  "overrides": [
+    {
+      "path": "core/server/host/extensions/answer-area-component.js",
+      "baseSha256": "0ea87a2064ab6ba32b3251cf78c9179638ba482653a653236a6231627370ace7",
+      "sha256": "27f8190e919f3a3635b33e80fda9d39ec1f61e3fd2955ea63ecbc76f88891bf7"
+    },
+    {
+      "path": "core/server/host/http/server.js",
+      "baseSha256": "27c2edcd76e18fae544f0dcfd149478dfd7f530a3f4f6d03245e95c3d6cb1156",
+      "sha256": "66069eadb9f542fd217d6f1dee39f283e26e075e7a8e6e9236b7b9d23ccbd3aa"
+    },
+    {
+      "path": "core/server/host/library/import-validation.test.mjs",
+      "baseSha256": "94683e21b586a979eaadfe569e7d9df5eb0effea4f79b77d6b7aeda72b2e1ad4",
+      "sha256": "f15cc2f2718ecddc4951889fc8212dc811bbe030ae4db1c83654dc21bc335db7"
+    },
+    {
+      "path": "core/server/host/library/library.js",
+      "baseSha256": "2c6d4eebe1eeb33ceafc23e6377a919fbc255bc12f1c2d94e8681eba1b0f9c8b",
+      "sha256": "294864222a931a30ac2c8fd49d2625ee908fb29abb888098077b9f2f84e87fa7"
+    },
+    {
+      "path": "core/server/host/practice/answer-areas.test.mjs",
+      "baseSha256": "5a65ff4bc597638f2063b3147e729ed94a0ddb8134730eac243da3bc19b7d786",
+      "sha256": "db638a23465e2fd3002eb95e3ddecf55ec5a3fdd02593471b5566ed98c846ace"
+    },
+    {
+      "path": "core/server/host/practice/state-store.test.mjs",
+      "baseSha256": "696a0be9ba0fb09bfdbb7ea6fdeae508fc50d1832b9a00b211a514b83056ac94",
+      "sha256": "745f32c98fc1f9efc0990fbcc49d220981ba18cab7d8083f60235a598b313aa0"
+    },
+    {
+      "path": "core/server/host/resources/listening.js",
+      "baseSha256": "afcefe286693c50a5a3aaed5dc29cad6763e46e9245e701097aa6214331ec4da",
+      "sha256": "ded361a7655115c6a958ad00524833b887b18c678db5179a1ee6f73ec14b82f0"
+    },
+    {
+      "path": "core/shared/answer-area/1.4.2/component.js",
+      "baseSha256": null,
+      "sha256": "1a27a9bf2bc7b364c17646319dfabb837cfb9c62e1f3efaaa41b4e3419333c14"
+    },
+    {
+      "path": "core/web/app.js",
+      "baseSha256": "c492bf928d30068762bfb29aeb0b0b147c7dc0ab63938cef8b5c985515ad3436",
+      "sha256": "ff93803a9f6df47ebd205ad9fb12bb5daf3831b30c0e57f17fe145013ed8538e"
+    },
+    {
+      "path": "core/web/bridge/api-v1.js",
+      "baseSha256": "4d57101c56038a1a9fe6535028a4e5800d37fb15b71672d0f14ccf18639544a9",
+      "sha256": "d36ff964549abc2e67eb01370aba2014e8ec5574ddfe81a3dae162da1e6ec272"
+    },
+    {
+      "path": "core/web/bridge/frame.js",
+      "baseSha256": "ea1f7ddcdd42e90e653eec8cad35eaa517edddd07544cf640de4b188fc5e93fe",
+      "sha256": "82781614581c97b5624829e1ebbe131cae1fd5f489ca7d0804a1db40ded6d564"
+    },
+    {
+      "path": "core/web/draft/whiteboard-model.js",
+      "baseSha256": "c6e625d6bcbdd1b1e9c18b30eb6f0154dc7d3918ac4f22540c028946859527ba",
+      "sha256": "623b4def0844befed896f4a9d5ac38ecfb1b2d0a4d7343ca87a33d1c8c0decd4"
+    },
+    {
+      "path": "core/web/draft/whiteboard.css",
+      "baseSha256": "a3dc1a9e637172d590e581df9dcd449f89f45bb42b405bee09281ea20cbfc585",
+      "sha256": "69c428fa01a397a9ad7db4f3ca9dbcad56a1e7fef2d49d2a6bccee4a9061d9ac"
+    },
+    {
+      "path": "core/web/draft/whiteboard.js",
+      "baseSha256": "4c2f9441ca217b6cb726546f688c3ee1704cc89078b13e27da6eb2c547a5bbc4",
+      "sha256": "65b0c0cf00d7aa41a1eb51ca2cead139192c377bbf704b57e2bbd07ad38a757e"
+    },
+    {
+      "path": "core/web/library/library-view.js",
+      "baseSha256": "8d4b74525381f262a87d5d4d568ca124090d4bb786bfb2b4cfacb2e0f99d7368",
+      "sha256": "c4a0aaa1bbe9ee7f7f9c44198185d9a1340d2ffba7fa26dbae86750383fe452b"
+    },
+    {
+      "path": "core/web/listening/listening-player.js",
+      "baseSha256": "a0c72ef5e5086ada47f430b24a6f08b2586e20a8ea1e83082649ba5c6158acd7",
+      "sha256": "3cfbe71e09c79621f7db025cf4cc83386181ff3c40782346afa32e604b99c72b"
+    },
+    {
+      "path": "core/web/listening/network-audio.js",
+      "baseSha256": null,
+      "sha256": "54f2f83098bd2c302a9be08b68f047aec72fbfb99de0569e12c37be85467cbc2"
+    },
+    {
+      "path": "extensions/基础题型/判断题/manifest.json",
+      "baseSha256": "c8b85dc680a889e893a9dec69a03ca104198c2da528d3fe4e17102e6978173dd",
+      "sha256": "c94e8b83c561b23b7964b32c1b0de9be452d892c236848047999bb4628e47e0b"
+    },
+    {
+      "path": "extensions/基础题型/判断题/practice.js",
+      "baseSha256": "e437ffadf21941f7e68c040d56c9febced7cf218774114271b3cb7440cdbb9fa",
+      "sha256": "8280b403f1592b13992c95d1f64a99bc78961412045322c0b171fee4b3d89e1f"
+    },
+    {
+      "path": "extensions/基础题型/单选题/manifest.json",
+      "baseSha256": "513fd8c4ee4219ca3e19c10853dab72be1dfd240a98067aaef355157547f01a7",
+      "sha256": "f1545a0505f2a8ea77aa6745fa16df67a64c5c396e0bb04a94b4713d2af58aa8"
+    },
+    {
+      "path": "extensions/基础题型/单选题/practice.js",
+      "baseSha256": "852e5953a72e45468841450809e45d36ae014a0e59eaacb82208c819d57af0ac",
+      "sha256": "029da52fd7430d639dd701f8564dc89380193779c4edddd8715c53d968298a54"
+    },
+    {
+      "path": "extensions/基础题型/多选题/manifest.json",
+      "baseSha256": "1480a729a24d5e6e1acf49585c2f0e5479538439260a0ad06ade2193b9c1bfb4",
+      "sha256": "bd876684725193b3243bb168785a04910c132332ccceea3f9fdee43cffb8e90a"
+    },
+    {
+      "path": "extensions/基础题型/多选题/practice.js",
+      "baseSha256": "1d41152284bb3525c97817c3b0583a18727871181db92c54c73b665bf8841725",
+      "sha256": "53933780819635759d038e7c21354d8cc4dfae6c0ae22f7a1e094e2d4567d119"
+    },
+    {
+      "path": "extensions/基础题型/简答题/manifest.json",
+      "baseSha256": "251c6f3ced88a522d13a52b7155991bd2b2903501fd344e651600e1e355ac436",
+      "sha256": "5da819beb6c28eb21d8e7fb281a38418ff205de49aa8bb89b2f56769ca615877"
+    },
+    {
+      "path": "extensions/基础题型/简答题/practice.js",
+      "baseSha256": "4582203706b127943e1ffc088ee6011890dc84d07b87712f3451315562ffd723",
+      "sha256": "b135eafe7f178269bb6149b3253e64edb530a67c868c1634878e8a72d07f7572"
+    },
+    {
+      "path": "extensions/基础题型/简答题（答题区）/manifest.json",
+      "baseSha256": "24030c22fc6dfdf3897b3453cc7c63b75becb141c1aea07d6cac4898d1232feb",
+      "sha256": "95d4261f721664dc08e601b9d6ee122a516bad02d86c616fc9e12ab0e5627faf"
+    },
+    {
+      "path": "extensions/基础题型/简答题（答题区）/practice.js",
+      "baseSha256": "90072e5cc03be7522faf4f17bb70ba9161c90649003df2e040232f85c99032d7",
+      "sha256": "6a088cf90a6b6337eb8d74ce94c2f49d89dce744cfcaa9fa363d90cd26f26ef8"
+    },
+    {
+      "path": "question-banks/基础题型/EXTENSIONS_LAYOUT.md",
+      "baseSha256": null,
+      "sha256": "545c6b3b70f51ec79ce6edc45236eb9df69cf5b904932b1eed76997f9853720c"
+    },
+    {
+      "path": "question-banks/基础题型/MIGRATION.md",
+      "baseSha256": null,
+      "sha256": "9db821f4224a7ce83fa4a62f31acf2379124e0a37817a37069fa417c1f797247"
+    },
+    {
+      "path": "question-banks/基础题型/基础题型展示/assets/97c5b39b51b8d7f75c85e010672604060eb3c820c5d17e6bd87a68d5c6601afe.png",
+      "baseSha256": null,
+      "sha256": "97c5b39b51b8d7f75c85e010672604060eb3c820c5d17e6bd87a68d5c6601afe"
+    },
+    {
+      "path": "question-banks/基础题型/基础题型展示/bank.json",
+      "baseSha256": "0084bf45fd295109c66b453f1bec66bbc074b48bbcc32fc7571eb5f3b6c081ce",
+      "sha256": "c7bc9230227513fc9a74e08541a13c57b9e52fc3bbee1b4fef0f22ab0a55f79a"
+    }
+  ],
+  "inventory": [
+    {
+      "path": "basic-content/extensions/README.md",
+      "sha256": "a60286cba2b84fa64b938b77d3df2b701547d958dd85ede4405d16f279bd4cc6"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/.bundle.json",
+      "sha256": "60b2f402103fb2ae27b06ad8065a6e7b84c45d237673c03793dbd3bf1449a45b"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/answer.schema.json",
+      "sha256": "4b54c76fafe2243c872540f12e2eedce88352a82350e45785383e14484cda93b"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/editor.html",
+      "sha256": "a561e2c621d1dc031d5917bd029f0afcc69aa4fe0e4ff3839e277b552397a318"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/editor.js",
+      "sha256": "0be51738a3814a56d6b50417ed2a14dde39cb7d87117641780d5c6e8fd1242da"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/editor.json",
+      "sha256": "4ac4fa6cdba8e6eab090548e50f91bc0e45132eacfa4dac95d497ee09b2b35ab"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/examples/bank.json",
+      "sha256": "7ca0ecc13d18f6b5597904550a84ac0a1b05896bb2037a47d4e2247e285a9e4b"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/manifest.json",
+      "sha256": "c94e8b83c561b23b7964b32c1b0de9be452d892c236848047999bb4628e47e0b"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/practice.css",
+      "sha256": "e321927b8b9cb787a7d343ad2c24f4f1acba57628b73377e7c679a61caa1bde4"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/practice.html",
+      "sha256": "ad65a9c2e7cf3d5f59ae3cd0a866875e5e83a3b31d927f6d199df6894d191a73"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/practice.js",
+      "sha256": "8280b403f1592b13992c95d1f64a99bc78961412045322c0b171fee4b3d89e1f"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/question.schema.json",
+      "sha256": "cde89c4a8a6507f3c3a1c310824b45569f955500cd7be53ab8d7bad90e147641"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/判断题/rules.js",
+      "sha256": "2d45222456856acdea73aa6aec42e8a8ec5afa2c3843cdf9dff75cb648cf551d"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/answer.schema.json",
+      "sha256": "7d4b83bdc9afcececafaf76e33706897b0eaa338760b699d5f50144b6d20c44e"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/assets/96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8.png",
+      "sha256": "96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/editor.html",
+      "sha256": "1ffe5c958098fc774f279184fec6674a0848e5ecff49512136fe777961096c7f"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/editor.js",
+      "sha256": "a9baaa2a1cb3a3f92a5ed13538f90b25e1100e2662eac1280772f2620fe6ca3d"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/editor.json",
+      "sha256": "422d8a10c97bbfc209cab120749864e297c4b44e49a46e398912d6ce87017d12"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/examples/assets/96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8.png",
+      "sha256": "96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/examples/bank.json",
+      "sha256": "b90086958ce20165f09d5da359c1f85582baa425970c37edf5aa5fec3d86aa5b"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/manifest.json",
+      "sha256": "f1545a0505f2a8ea77aa6745fa16df67a64c5c396e0bb04a94b4713d2af58aa8"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/practice.css",
+      "sha256": "e321927b8b9cb787a7d343ad2c24f4f1acba57628b73377e7c679a61caa1bde4"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/practice.html",
+      "sha256": "edfd553e5053621997c03c50c1257063ea600d85d0907b2779f435404574e08d"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/practice.js",
+      "sha256": "029da52fd7430d639dd701f8564dc89380193779c4edddd8715c53d968298a54"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/question.schema.json",
+      "sha256": "1e70adc136b6eaa1c191d97357444629a048eed8e12f86f8306026f1587414a2"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/单选题/rules.js",
+      "sha256": "63364730efe9c814d5b43dfe23dc7557134bf56657ee0eeccda853d27e6b1e10"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/answer.schema.json",
+      "sha256": "25b019c2d5b07842fcee1d50f17494d6e06d03ef88fd908659ed4cabac9864ad"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/editor.html",
+      "sha256": "0de855983c18665a5f2ec835b0d5ddec6d1b0eccb5823a7e5605bb5a09343834"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/editor.js",
+      "sha256": "a950c4e0e5286a7e2ab407c20d7cd8e7a3bee01ea087faccca5ec20e6eefe97e"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/editor.json",
+      "sha256": "4ac4fa6cdba8e6eab090548e50f91bc0e45132eacfa4dac95d497ee09b2b35ab"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/examples/bank.json",
+      "sha256": "a68e1d8f57b028e6e03baf2dbf8dd46ca60dbc7b2395af78a4a5ae5ad25b4466"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/manifest.json",
+      "sha256": "bd876684725193b3243bb168785a04910c132332ccceea3f9fdee43cffb8e90a"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/practice.css",
+      "sha256": "e321927b8b9cb787a7d343ad2c24f4f1acba57628b73377e7c679a61caa1bde4"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/practice.html",
+      "sha256": "c6bc2bd0af798c2e1ea556759f524b3378633192cbb9ec8dab9ff62061dcc44c"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/practice.js",
+      "sha256": "53933780819635759d038e7c21354d8cc4dfae6c0ae22f7a1e094e2d4567d119"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/question.schema.json",
+      "sha256": "7a95aeb6150f1f1e473463b5e76a34dcd133468f40d499679699716ca7ab624d"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/多选题/rules.js",
+      "sha256": "99f15e5440f2ff069c4d5dc65aaf0ecb3d55ca0f55fa4860c0fe73164aca2e44"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/README.md",
+      "sha256": "0dd963583f50a4d89e51ca0569cd424773fb45ffa0a1ecdf420a197a5bce1a04"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/answer.schema.json",
+      "sha256": "b1ecf00d40a36b8a2e6c3ca3e7f50821527c0a50956c4f5fefd140e922e7f5c5"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/assets/96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8.png",
+      "sha256": "96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/editor.html",
+      "sha256": "1c6ce0ac979b280dc5915e646180a1a27c6e1059ee7093ab6251274f53180d10"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/editor.js",
+      "sha256": "593d0fb27ef4ecfdadab50f740ffe068d6b53d35d9deb5aec0c1b6b50e0c8849"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/editor.json",
+      "sha256": "422d8a10c97bbfc209cab120749864e297c4b44e49a46e398912d6ce87017d12"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/examples/assets/96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8.png",
+      "sha256": "96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/examples/bank.json",
+      "sha256": "3b5d056df382dfff9789021071118e51c7fbc54d078c07dd682e938d2ee5d52f"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/manifest.json",
+      "sha256": "5da819beb6c28eb21d8e7fb281a38418ff205de49aa8bb89b2f56769ca615877"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/practice.css",
+      "sha256": "be87aa6d2df72d74055a61278be4472e08a98aa40932483f3b59c82c946e3f4b"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/practice.html",
+      "sha256": "cd6dff98853936fc318e27a79b4afc46ac244aa4532f897102962a62683207b4"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/practice.js",
+      "sha256": "b135eafe7f178269bb6149b3253e64edb530a67c868c1634878e8a72d07f7572"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/question.schema.json",
+      "sha256": "f2d486d1b120893e1ae1f590c30652a84838e53819b863387e470d1a53bb643a"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题/rules.js",
+      "sha256": "ff9d14fd2abb81e5936ba22844a05647c4c15f03e98b03821ce2b34dce339df6"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/README.md",
+      "sha256": "c64a38072186245fb7fee6d38602fdc54d331118da95bffe9a751a5a5a58b67b"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/answer.schema.json",
+      "sha256": "74375af8b74bb95d30b22cd31eeef143c274c80125bd63512658868fe8d4bb60"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/assets/96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8.png",
+      "sha256": "96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/editor.html",
+      "sha256": "1c6ce0ac979b280dc5915e646180a1a27c6e1059ee7093ab6251274f53180d10"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/editor.js",
+      "sha256": "bd68a9a97fa9806a375bfddd7e6d68ed7f2eba5318b6b43dc54cdbefe4c86a67"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/editor.json",
+      "sha256": "422d8a10c97bbfc209cab120749864e297c4b44e49a46e398912d6ce87017d12"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/examples/assets/96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8.png",
+      "sha256": "96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/examples/bank.json",
+      "sha256": "03580b7b938d8d9d50213447e51e99c0debfef59c3ebf504a645707a14c9f282"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/manifest.json",
+      "sha256": "95d4261f721664dc08e601b9d6ee122a516bad02d86c616fc9e12ab0e5627faf"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/practice.css",
+      "sha256": "43b0ec57c6215a994f75087e7d274bd6081885dd2371b42f571748c52851fed8"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/practice.html",
+      "sha256": "cd6dff98853936fc318e27a79b4afc46ac244aa4532f897102962a62683207b4"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/practice.js",
+      "sha256": "6a088cf90a6b6337eb8d74ce94c2f49d89dce744cfcaa9fa363d90cd26f26ef8"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/question.schema.json",
+      "sha256": "676f6a2c891915869db272252136947c33f728f98b3cddb5e282c8f824272557"
+    },
+    {
+      "path": "basic-content/extensions/基础题型/简答题（答题区）/rules.js",
+      "sha256": "74de2853f6a2d6e1e0db47e1727502808679a483ebdabb4851763f1305aa4e00"
+    },
+    {
+      "path": "basic-content/question-banks/基础题型/.group.json",
+      "sha256": "6874868ab02117edba50db2abe50531fce4f57d08f37e88e56cddf67c09b8357"
+    },
+    {
+      "path": "basic-content/question-banks/基础题型/基础题型展示/assets/96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8.png",
+      "sha256": "96fbe7bbe9e76622b6236d0d0fbfddb92f022249ac38bdbbd908efd3bf3791a8"
+    },
+    {
+      "path": "basic-content/question-banks/基础题型/基础题型展示/assets/97c5b39b51b8d7f75c85e010672604060eb3c820c5d17e6bd87a68d5c6601afe.png",
+      "sha256": "97c5b39b51b8d7f75c85e010672604060eb3c820c5d17e6bd87a68d5c6601afe"
+    },
+    {
+      "path": "basic-content/question-banks/基础题型/基础题型展示/bank.json",
+      "sha256": "c7bc9230227513fc9a74e08541a13c57b9e52fc3bbee1b4fef0f22ab0a55f79a"
+    },
+    {
+      "path": "core/package-lock.json",
+      "sha256": "da31f1db5c13dad63b0daed48cda90870d53556262997aa22fd746321b6a24b2"
+    },
+    {
+      "path": "core/package.json",
+      "sha256": "9b4e1203552b2acbcc9de117652b5a67fbbba5c8c16ba7b3e009ddacbc393e4e"
+    },
+    {
+      "path": "core/server/README.md",
+      "sha256": "fc645b42b4a0255ffcf6bf22fd54a2545459fbf3608caa1e697af3d318332c4f"
+    },
+    {
+      "path": "core/server/host/ai/ai-diagnostics.js",
+      "sha256": "d699bcc8b52c87692d2ce050bf385d3215c2fe44c797d49e10363cfb45409802"
+    },
+    {
+      "path": "core/server/host/ai/ai-grading-service.js",
+      "sha256": "381370f5aa2d56b48d8d58ec37d22b225a35253b4c6dff9e528a3af1a89303eb"
+    },
+    {
+      "path": "core/server/host/ai/ai-protocol.js",
+      "sha256": "9dee11bc4992c5777c5db92ce04a447d2b4446b5a465e843e4e8762ee0338680"
+    },
+    {
+      "path": "core/server/host/ai/ai-provider.js",
+      "sha256": "128c2604e9aabf322bb52e236fef5c4e15fb7f95b15eae267f2670b20ef36812"
+    },
+    {
+      "path": "core/server/host/ai/ai-settings.js",
+      "sha256": "5c6e44ad1529de049d42e6d3c5f836466a39b2381926cf2fde93424851e3986d"
+    },
+    {
+      "path": "core/server/host/ai/hub-connection.js",
+      "sha256": "f6de0090f7e56a86d540ab235d3b82e60689e2992a30c8cb08aff0e213936ab3"
+    },
+    {
+      "path": "core/server/host/ai/protect-credential.ps1",
+      "sha256": "9cfd85527e192d940bcee048251b9c262d750fa6c2be275a898fecdb196951d0"
+    },
+    {
+      "path": "core/server/host/editor/edit-journal.js",
+      "sha256": "5c2832bfe65d2f81cb72e14e41274b370f9ad6fb9abff2f0c2d9db2d7a351706"
+    },
+    {
+      "path": "core/server/host/editor/editor-drafts.js",
+      "sha256": "f50cef79d9ee0eedf50a70f8867680fdca7bd1edb38e4c189009048ced1c321a"
+    },
+    {
+      "path": "core/server/host/exam/exam-sessions.js",
+      "sha256": "00b50005cd647cef09d0f52a2b3dcee68112db91c95ad67638cc2f20b2785986"
+    },
+    {
+      "path": "core/server/host/exam/temporary-exams.js",
+      "sha256": "1760812d4e4e0e5f9fbc7184fcd419b0eee3ea03c897ed20fc3c5b2b66f28214"
+    },
+    {
+      "path": "core/server/host/extensions/answer-area-component.js",
+      "sha256": "27f8190e919f3a3635b33e80fda9d39ec1f61e3fd2955ea63ecbc76f88891bf7"
+    },
+    {
+      "path": "core/server/host/extensions/development-settings.js",
+      "sha256": "12a59eb9823bcfb700cfb4213631a0f91915792a4e8a14a048fb51c95beff673"
+    },
+    {
+      "path": "core/server/host/extensions/extension-api.js",
+      "sha256": "3eea2e92d3169d09f4476fe003c44f823fa79bb4b2d26efc83cae9592d48c39c"
+    },
+    {
+      "path": "core/server/host/extensions/extension-packages.js",
+      "sha256": "73673620122dd54ed8aac917b349e617b4624f4ed45aa902fb4bba3a6489f5e2"
+    },
+    {
+      "path": "core/server/host/extensions/rule-engine.js",
+      "sha256": "fa626c114db3d9adb28dce94d1779a2a8eb4e98433d497012ede9c183648e0cc"
+    },
+    {
+      "path": "core/server/host/extensions/validation-cache.js",
+      "sha256": "a137465ff3ea512651f4bcea0e0ec26aa03f3af5428be16de693946afbda0234"
+    },
+    {
+      "path": "core/server/host/history/history-rounds.js",
+      "sha256": "03562cf45e9e0823e51097c34203339fda63b1f02d9a30ee9a48cc5e6e17bd4e"
+    },
+    {
+      "path": "core/server/host/http/admin-contact.js",
+      "sha256": "0d0f584fe8a40e168b0816528c0f128ffd146313e40e6dc46f3d0bdaa66555f1"
+    },
+    {
+      "path": "core/server/host/http/desktop-control.js",
+      "sha256": "0442b9541e90f161cd7f7ac0c07b996faecfe880cef7a51190b2c5f5a6bc2219"
+    },
+    {
+      "path": "core/server/host/http/lan-certificates.js",
+      "sha256": "3b591150d1371a3519a1955fb7141ae3eb290297804308a2820b492c80973e9b"
+    },
+    {
+      "path": "core/server/host/http/network-addresses.js",
+      "sha256": "b33c12cdf4e1941a71b71927d9a3afa288c5158f4ef32b2feaf03137b3087403"
+    },
+    {
+      "path": "core/server/host/http/network-settings.js",
+      "sha256": "ba96cc2aad434064dd27cc5ffb1fa9f1ea772f9665dad5148ef6d43a0558e26f"
+    },
+    {
+      "path": "core/server/host/http/server.js",
+      "sha256": "66069eadb9f542fd217d6f1dee39f283e26e075e7a8e6e9236b7b9d23ccbd3aa"
+    },
+    {
+      "path": "core/server/host/http/tailscale.js",
+      "sha256": "f181d4be2c248c5c3f2b1ba2d9a06adb94f9146a2b5933bb0c0fda04a30ad837"
+    },
+    {
+      "path": "core/server/host/library/archive-move.js",
+      "sha256": "dc11ff13e5f7d9fe75287e392e66e59919b29517024c054be1ad63808902cb96"
+    },
+    {
+      "path": "core/server/host/library/bank-locations.js",
+      "sha256": "de391a4c9f66f9d07298d647e25e65d5b93241a7fab7bae364880cf907e39c36"
+    },
+    {
+      "path": "core/server/host/library/collections.js",
+      "sha256": "712cabd9659f8e79351a77c4f9e71f43fd9135ecdafe15c982b7325d1cf761be"
+    },
+    {
+      "path": "core/server/host/library/directories.js",
+      "sha256": "9427c2bd9e2d030f7f66190b9f5ee2b410d269babda20561300c8a477625f0ca"
+    },
+    {
+      "path": "core/server/host/library/features.js",
+      "sha256": "732552ee011e2948be6bf815e3ffcc0ba7cbe00dd484471afcc7260b51230fee"
+    },
+    {
+      "path": "core/server/host/library/identity.js",
+      "sha256": "434f153e25df0dd733ba9a90dfab411c38afa8d68bb9da02048f09f2b8700785"
+    },
+    {
+      "path": "core/server/host/library/import-validation.js",
+      "sha256": "7043f67a18f961128725abf63174641f84b79f0225d80be7943785aab99c3515"
+    },
+    {
+      "path": "core/server/host/library/library-archive.js",
+      "sha256": "d42f54813201ca13838975f8a9671d489ac58796dc8a0dcdf89d59828094426b"
+    },
+    {
+      "path": "core/server/host/library/library-index.js",
+      "sha256": "aa99fc28904a78da601ee9db78eada49c77d271ca3a0cb0c0cd3d1f837527afc"
+    },
+    {
+      "path": "core/server/host/library/library-management.js",
+      "sha256": "e9cfafb495511b5530d6544bf02becd79fc81c5c9d7bcd475e96596f2d3174af"
+    },
+    {
+      "path": "core/server/host/library/library-package.js",
+      "sha256": "8052b8079b7100e144f327915829346ca1f0a636c70322db852c7a490c6fe554"
+    },
+    {
+      "path": "core/server/host/library/library-removal.js",
+      "sha256": "3207977356339d8e602eb53a24cc06bea53aa1b2a36338ae69fe33df10fdd143"
+    },
+    {
+      "path": "core/server/host/library/library.js",
+      "sha256": "294864222a931a30ac2c8fd49d2625ee908fb29abb888098077b9f2f84e87fa7"
+    },
+    {
+      "path": "core/server/host/platform/dependencies.js",
+      "sha256": "4b5090778ac2b4b8ee61f232fd02f9c5a4b6f32bdacd80a7db5fd827a1b07135"
+    },
+    {
+      "path": "core/server/host/platform/errors.js",
+      "sha256": "e13b8295eb6f7accea566ac4eee4a23eb4b6a7b422162c5b00908d35c020674e"
+    },
+    {
+      "path": "core/server/host/platform/file-cache.js",
+      "sha256": "07fa49011805c5a9219beb22efee7a2f6a57dd63649cd72ea3e8d02732a64c5e"
+    },
+    {
+      "path": "core/server/host/platform/files.js",
+      "sha256": "677baa2b800ff3463ef7214800d5e0140028fb9209cd062bf27a75b92cb5cda0"
+    },
+    {
+      "path": "core/server/host/platform/initial-content.js",
+      "sha256": "4413c32bc7a60d06697c96a51bb967892a093e3c585b0bc830014f9897378a91"
+    },
+    {
+      "path": "core/server/host/platform/json.js",
+      "sha256": "2d7fb53690cf6cbc7c476442e3bc427594562eebcc144d838856f08864d21f34"
+    },
+    {
+      "path": "core/server/host/platform/transactions.js",
+      "sha256": "bb4f1662d1f3903411a1dfd685ba496805de81356e6882aee10471f6d0ea068b"
+    },
+    {
+      "path": "core/server/host/practice/answer-areas.js",
+      "sha256": "db2873f5761316f1336da389228d32f85b9772069460ee5fafa7c1e2d32544d0"
+    },
+    {
+      "path": "core/server/host/practice/collection-routes.js",
+      "sha256": "a0f8ff073c11ae71c3c2c6ad826318b64c3c1f25cff0549d82b82a7720efea49"
+    },
+    {
+      "path": "core/server/host/practice/outline.js",
+      "sha256": "11caa2f5c654b0bf0328b2ed367ebe76b288b0f63e3cbdc67a21200aff027d1b"
+    },
+    {
+      "path": "core/server/host/practice/practice-sessions.js",
+      "sha256": "9200a80c9032c98526922d55f7fd6d01e19579e5b0530ad10bc008b52e53a47c"
+    },
+    {
+      "path": "core/server/host/practice/short-answer-upgrade.js",
+      "sha256": "652ac3801396e1474934aa57c64243528d16383b7022006aabf5d5c84e315059"
+    },
+    {
+      "path": "core/server/host/practice/state-store.js",
+      "sha256": "8650d9451fd72408c55d670714e37da4e25c4e142130e4fefc09c10d760f1587"
+    },
+    {
+      "path": "core/server/host/practice/whiteboard.js",
+      "sha256": "f57a336bd42647cdb69fc17f7cb0d240dfd7671f8f2acf4398a10d93d97892eb"
+    },
+    {
+      "path": "core/server/host/resources/listening.js",
+      "sha256": "ded361a7655115c6a958ad00524833b887b18c678db5179a1ee6f73ec14b82f0"
+    },
+    {
+      "path": "core/server/host/resources/resources.js",
+      "sha256": "dd8e3f9f04da10118dd6ea3cbca2763ef7b6580dd8e4e7be2890dde1a3ed380e"
+    },
+    {
+      "path": "core/server/host/resources/richtext-service.js",
+      "sha256": "22ba5cf856bc45d739074d124e9d83443d693716c488810b5c6c2aa883762d49"
+    },
+    {
+      "path": "core/server/main.mjs",
+      "sha256": "7507cb6fccf9e9969d33d35f977e8939fe1cdc36d7381ad0f8443cf688fe5c0e"
+    },
+    {
+      "path": "core/server/rules-runner.cjs",
+      "sha256": "2c06aa311217b50ea8e27aeffb6ea8752c5c890175a17a582c5ef00044a87314"
+    },
+    {
+      "path": "core/server/rules-runner.test.cjs",
+      "sha256": "f24136203565b955987e3359c9ca799d93adaaae51dcc69cf5e00cf3f8da4f65"
+    },
+    {
+      "path": "core/shared/answer-area/1.0.0/component.js",
+      "sha256": "0aa5ab53b9d2c44da7db540d3c4af8b18e7b65e0bfcd656b4f14478d6a4f34a6"
+    },
+    {
+      "path": "core/shared/answer-area/1.0.0/model.js",
+      "sha256": "7857e709e6cc6f3d201a8aeb49d23c082347cf12e209cdd67f7cbf55e4258da0"
+    },
+    {
+      "path": "core/shared/answer-area/1.1.0/component.js",
+      "sha256": "49e5275adcf4220eda4547c8bb7c43eb4b5403022caec89b8c0327862737105e"
+    },
+    {
+      "path": "core/shared/answer-area/1.1.0/model.js",
+      "sha256": "ec55fdff144a375ca8becd509a68be487e60452be7d97062a8ebaa25df68174f"
+    },
+    {
+      "path": "core/shared/answer-area/1.2.0/component.js",
+      "sha256": "d902fcd17eb687b40e7265b7106e70fd2dd645474957a7e54dfa6b35b1380859"
+    },
+    {
+      "path": "core/shared/answer-area/1.2.0/model.js",
+      "sha256": "b672f0f0b252ea73879e89d6b54cd3cd33707088943c08aec631ee7d679c2d1a"
+    },
+    {
+      "path": "core/shared/answer-area/1.3.0/component.js",
+      "sha256": "404e18ffca5e69cd2c950db8146b5fb7def587afa16a1335e96704967528b62f"
+    },
+    {
+      "path": "core/shared/answer-area/1.3.0/model.js",
+      "sha256": "388ae34d4db3df715fb7b487ede57b62c723d7d4c280c9a085f9299e3a8eb299"
+    },
+    {
+      "path": "core/shared/answer-area/1.3.1/component.js",
+      "sha256": "dbd3b181b4bd6eb482732a19c5038fdfc0f8b4b3f5c48a7a4b12511e5390caa8"
+    },
+    {
+      "path": "core/shared/answer-area/1.3.2/component.js",
+      "sha256": "a7c1e492fc8f3ea14f7c7b2be83c40c675730b1843e385cfbc17cf141d41733c"
+    },
+    {
+      "path": "core/shared/answer-area/1.4.0/component.js",
+      "sha256": "8a18b0d50e85f8888826ae61e0255889b1c6f2bea8940168eab7a151720e5f72"
+    },
+    {
+      "path": "core/shared/answer-area/1.4.0/model.js",
+      "sha256": "63dfc5e25e6b1a23581a0a684ad00fad8a9b1cb7718ff4c1cb8e80d607b7b11c"
+    },
+    {
+      "path": "core/shared/answer-area/1.4.1/component.js",
+      "sha256": "8466570b2b03033b7cffe2b864a1b51c571110c5e0288e6d4c58cf1247383b42"
+    },
+    {
+      "path": "core/shared/answer-area/1.4.2/component.js",
+      "sha256": "1a27a9bf2bc7b364c17646319dfabb837cfb9c62e1f3efaaa41b4e3419333c14"
+    },
+    {
+      "path": "core/shared/ink/1.0.0/renderer.js",
+      "sha256": "b23f8516fce7d2f7c400af092c5c734995570ec6d22109293ca7ac5938ad4b4c"
+    },
+    {
+      "path": "core/shared/richtext/1.0.0/README.md",
+      "sha256": "2b678be85c7111672cf180dfafd50f91aa694a2265f76c3065bf986b6f56c6da"
+    },
+    {
+      "path": "core/shared/richtext/1.0.0/THIRD_PARTY_NOTICES.md",
+      "sha256": "ea6f2914130502e758825ed535c45bc098201ca5f00a3bea7f2a4d7d1d9935bb"
+    },
+    {
+      "path": "core/shared/richtext/1.0.0/manifest.json",
+      "sha256": "77b222b57baea912621dba8071bd79e9bf81229538556cac418441018beb855b"
+    },
+    {
+      "path": "core/shared/richtext/1.0.0/richtext-editor.js",
+      "sha256": "3e0dca4c9ebeb0512311f5a50c0873865873a6d38308fc7a9b3ca76d646b88bf"
+    },
+    {
+      "path": "core/shared/richtext/1.0.0/richtext.css",
+      "sha256": "477e7c0106c387fb1e1ceedb2a173d6d0ee7b08b291cfea7ffea7ec20dfbe061"
+    },
+    {
+      "path": "core/shared/richtext/1.0.0/richtext.js",
+      "sha256": "8d3cd1719d12144f99c876e48c2c57cf2a220f89d96b13c0e65fda4d33e5b1bb"
+    },
+    {
+      "path": "core/shared/richtext/1.0.0/src/document.js",
+      "sha256": "b7b23ae8991490fc577aedc634a716caab8a0ffa6fe554f27a08930ef18de2b0"
+    },
+    {
+      "path": "core/shared/richtext/1.0.0/src/editor.js",
+      "sha256": "34cb8afdead079bfb3e642aff38e6cbdaf5c6dfdd69c8203200df65de7b073c5"
+    },
+    {
+      "path": "core/shared/richtext/1.0.0/src/render.js",
+      "sha256": "0532c2fe884472fadf84c6e8282c20f84fffc69ae8c2cd8e7efd1c818b40fb02"
+    },
+    {
+      "path": "core/shared/richtext/1.0.0/src/static.js",
+      "sha256": "a6b09a203e7c7c10df98b6a01db1622e491f194c04ce8baf2cbb583eb090eb86"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/README.md",
+      "sha256": "5aa9ab93ad29b16847a0bcd54976b0bd5ce43fbb338f4f742c9780e26e27f36f"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/THIRD_PARTY_NOTICES.md",
+      "sha256": "6671cc65984edb5d9bd44f040403b57c9a17f999e0cfa484cc722f809e9cc55a"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/richtext-editor.js",
+      "sha256": "75bd60342b1acd0010371587721f66f32cbf527bd3060c17f733ef02e455fc6d"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/richtext.css",
+      "sha256": "0aaab05842d0268e126d8875907d8cc2bf131aee19cf84a9db116a82a6a9a678"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/richtext.js",
+      "sha256": "b96eb3120c874e4fbdeb422aa7c7c01419aa28a7313e3d0c1c752d6090c5be09"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/src/document.js",
+      "sha256": "1c3786a8e43dc5b249c6e3b68d8fa8d7f124b7c5037c223baa9ec69fd456664d"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/src/editor.js",
+      "sha256": "18d89033deee0885534ebccc709bf9c6caf92636cdd2c6397df6564894dec2ad"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/src/image-view.js",
+      "sha256": "42c0be87f9bdd23b92c1103bdd79ac2ba9aaa36ab0b1506f4f8f65d72f998b57"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/src/photo.js",
+      "sha256": "2b8ffcbe89de2b187a1f188a6ca4504c89d31d04009b164179f6e038d2c4055b"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/src/render.js",
+      "sha256": "5905f76a2e2a037586f9b20389e2591188380ad5ab114247662855469964ea87"
+    },
+    {
+      "path": "core/shared/richtext/1.1.3/src/static.js",
+      "sha256": "a0420d84a45aae13b8ad403a94f69337d9e1f2e58fe310b11eeb1d945b0ab2d4"
+    },
+    {
+      "path": "core/shared/richtext/service.json",
+      "sha256": "e981736a8d022303538a79324b7f3e6c5934566349f2273bd5748238e02cb07b"
+    },
+    {
+      "path": "core/web/ai/ai-client.js",
+      "sha256": "4336f955882d881ff45af4889a6eaf6e9a3107b6a31f6ab518024d67c17a2e7d"
+    },
+    {
+      "path": "core/web/ai/ai-settings.css",
+      "sha256": "8c2acdd9c37f7efa673043cb85115bceb4d4d58b25b96d2c112ae0381ed73fc7"
+    },
+    {
+      "path": "core/web/ai/ai-settings.js",
+      "sha256": "f495652fa128be3f366e84a54434b0795fc9735caf01a6b74e848096ef79adc9"
+    },
+    {
+      "path": "core/web/ai/hub-login.js",
+      "sha256": "86bcf075c955a67608e66b4a63831c7d53d005cd82913524c75350db9b84ee72"
+    },
+    {
+      "path": "core/web/ai/user-center.js",
+      "sha256": "21a9f25a27be6aaaa955ed93c35e6e6dd88b69089224c1a8a92794d97b25e7bc"
+    },
+    {
+      "path": "core/web/app.js",
+      "sha256": "ff93803a9f6df47ebd205ad9fb12bb5daf3831b30c0e57f17fe145013ed8538e"
+    },
+    {
+      "path": "core/web/assets/backgrounds/coast.svg",
+      "sha256": "717b72bc36a06fd220f5053bf7b0041ac0fd8a3639c97ee5651e02e3a9370413"
+    },
+    {
+      "path": "core/web/assets/backgrounds/dawn-lake.svg",
+      "sha256": "aa281e5c214ed1526b75a2292667ccd0ef5889108ff6436e83f69c4030f04694"
+    },
+    {
+      "path": "core/web/assets/html2canvas-1.4.1.min.js",
+      "sha256": "e87e550794322e574a1fda0c1549a3c70dae5a93d9113417a429016838eab8cb"
+    },
+    {
+      "path": "core/web/assets/html2canvas-LICENSE.txt",
+      "sha256": "86200ce4e92d9a22c41c8647a55f7a5fddff304ff89b4d36ecc699ed8c123d2c"
+    },
+    {
+      "path": "core/web/assets/quizforge-icon-192.png",
+      "sha256": "a164e14f9c2e947fb9a46ed17f3b4cb540a72c91b571cef230fc01427679d116"
+    },
+    {
+      "path": "core/web/assets/quizforge-icon.png",
+      "sha256": "eb89695b4e05f19ea73086874258c2f86330e4d160508354f5f0db9609e14bdf"
+    },
+    {
+      "path": "core/web/assets/quizforge-icon.svg",
+      "sha256": "2f30f7908ae275dd583646a6bde273592cbfc5f987bd3d7cc8f232303c93d73c"
+    },
+    {
+      "path": "core/web/assets/quizforge-maskable-192.png",
+      "sha256": "4c61bc628484cf304b9b1a8eea52117d6437cadad02d77a0b678411ddedd0e49"
+    },
+    {
+      "path": "core/web/assets/quizforge-maskable-512.png",
+      "sha256": "c4f5f6482a594bccca6e1c8399391db10132496e6565dada7d5a511fe1b7d90b"
+    },
+    {
+      "path": "core/web/assets/quizforge-maskable.svg",
+      "sha256": "3a088951404e0b7b1535b55aad30e552ac1fe2a06284a1942fe5e0c754d21e7f"
+    },
+    {
+      "path": "core/web/assets/quizforge-touch-icon.png",
+      "sha256": "6532a9923c593998f15aec827b50f0a5c5c430b1e6fd6b2bf05afdd5aa1b043f"
+    },
+    {
+      "path": "core/web/bridge/api-bridges.js",
+      "sha256": "997be54200c37b9b1ca0a7010cfd6c0eca61ee38d3a7d0c6ddb49a71faa71c77"
+    },
+    {
+      "path": "core/web/bridge/api-v1.js",
+      "sha256": "d36ff964549abc2e67eb01370aba2014e8ec5574ddfe81a3dae162da1e6ec272"
+    },
+    {
+      "path": "core/web/bridge/extension-pages.js",
+      "sha256": "0dd8e717212c0a7ddd557225e2a21997c4e07274da9151be5ea8fa8cdf1d3d34"
+    },
+    {
+      "path": "core/web/bridge/extension-requests.js",
+      "sha256": "4d24044432d708111ac3cc71bacdfbc9602fd7cbda854dd2b003598884874a98"
+    },
+    {
+      "path": "core/web/bridge/frame-capture.js",
+      "sha256": "609f8519322009131d85f17ee5ecc4c3ed9c45e2c566a522127d7cc0514b0a00"
+    },
+    {
+      "path": "core/web/bridge/frame.js",
+      "sha256": "82781614581c97b5624829e1ebbe131cae1fd5f489ca7d0804a1db40ded6d564"
+    },
+    {
+      "path": "core/web/bridge/page-assets.js",
+      "sha256": "32986945636023288ec80be57899c9c1288ce3b2bf57437777dbd55ca168a2d2"
+    },
+    {
+      "path": "core/web/development/development-preview.js",
+      "sha256": "e361c81e9a073220ef625fe4b6de951037c913800d5a14ebd790e55b968f1426"
+    },
+    {
+      "path": "core/web/development/development-publish.js",
+      "sha256": "738f2d163993bf6b0e1dbda44331d11bc12a98edab0e967ad20f92aa2bc66444"
+    },
+    {
+      "path": "core/web/development/development-settings.js",
+      "sha256": "81a311dc408fa992dc9f8e351a00a62214bd0474bf05d08ec644f1ed9d2c8226"
+    },
+    {
+      "path": "core/web/development/development-watch.js",
+      "sha256": "22eb8e8866ec3d45e8e4f50328c806f6ed038059078fcb1c49b387e55ba8e064"
+    },
+    {
+      "path": "core/web/development/development.css",
+      "sha256": "a5f9e48b8a803c1d95c8dbd4fe93a5fd09897dec11c1c5e09f76331ac0c9f431"
+    },
+    {
+      "path": "core/web/draft/answer-ink.js",
+      "sha256": "e8786c719df3d0cda32215214527da4c7b18d985af33768ede77028085d4f975"
+    },
+    {
+      "path": "core/web/draft/camera.css",
+      "sha256": "4575b2437f5619383e7fdec2188e8f455018e323d984a7896d24a80656aabf91"
+    },
+    {
+      "path": "core/web/draft/canvas-space.js",
+      "sha256": "4c1434b88aac0ff6500a27eb14994a93060078d7b095b259b69c998c34604d36"
+    },
+    {
+      "path": "core/web/draft/draft-fullscreen.js",
+      "sha256": "a649bae905287b10abf9a2485cf0408b5c997ec645ed6ab21453b082dd7d5365"
+    },
+    {
+      "path": "core/web/draft/view-camera.js",
+      "sha256": "3011f56b6430fa64c2bfcf1b532d0cb55551277248a9a0f8809f5606a5480f03"
+    },
+    {
+      "path": "core/web/draft/whiteboard-dock.js",
+      "sha256": "829b249ddfe7ff9d8371d20bf5c717d71510da2bc1553ad3cae3f1d2cc3b264c"
+    },
+    {
+      "path": "core/web/draft/whiteboard-model.js",
+      "sha256": "623b4def0844befed896f4a9d5ac38ecfb1b2d0a4d7343ca87a33d1c8c0decd4"
+    },
+    {
+      "path": "core/web/draft/whiteboard-selection.js",
+      "sha256": "e9d177f31d9b4899e6d02804b0635859bb4ed8e4466cedd83d08a6d775bf6553"
+    },
+    {
+      "path": "core/web/draft/whiteboard.css",
+      "sha256": "69c428fa01a397a9ad7db4f3ca9dbcad56a1e7fef2d49d2a6bccee4a9061d9ac"
+    },
+    {
+      "path": "core/web/draft/whiteboard.js",
+      "sha256": "65b0c0cf00d7aa41a1eb51ca2cead139192c377bbf704b57e2bbd07ad38a757e"
+    },
+    {
+      "path": "core/web/editor/editor-navigation.css",
+      "sha256": "fd81a38a2658ab2c0a9b342ca4d098ae8e10acdb67c1f23875278d0d375769b8"
+    },
+    {
+      "path": "core/web/editor/editor-navigation.js",
+      "sha256": "06093f027e77d25608b9550a6bd1380d509bf15448dca8542cb613e1c0d21efc"
+    },
+    {
+      "path": "core/web/editor/editor-session.js",
+      "sha256": "ec26b879a32d0427b0bbd43556dcbea433ee7e4e23400fffaf48df8b84364511"
+    },
+    {
+      "path": "core/web/exam/exam-mode.css",
+      "sha256": "9059b3d5d285673181add37ba3f1cc627b8ce7df946d069fb2339a5e0dab07af"
+    },
+    {
+      "path": "core/web/exam/exam-mode.js",
+      "sha256": "63b5ca6b7681e37613f655973fa3bec683e9e675207152cd2499afa2d2f95065"
+    },
+    {
+      "path": "core/web/favicon.ico",
+      "sha256": "1cda77e0b869903fc29f2109d0a15db26533bf52ba320f2e78acd47be75d2286"
+    },
+    {
+      "path": "core/web/history/history-view.js",
+      "sha256": "1ebdc361171c1f76d4800ca6ab930dabbc21e43521a00417a2836ece839c584d"
+    },
+    {
+      "path": "core/web/index.html",
+      "sha256": "510e1f6de2d4cec99fb1072fc8bdb92c9c1645b1e87b17d5ac047349c047b6b9"
+    },
+    {
+      "path": "core/web/library/extension-groups.js",
+      "sha256": "95072dcac39ad8e69fd56c0e68a84ba94c28354ee16f4aac45cded1ddf13853a"
+    },
+    {
+      "path": "core/web/library/library-index-client.js",
+      "sha256": "d7fa2beb3c9a4f68badbed6c8e24dd94f2c9e080211017de09ab59c50319745e"
+    },
+    {
+      "path": "core/web/library/library-management.css",
+      "sha256": "3b3d304f24bb1cda235d7b9973ca09e26641bc90baba635eeaf96598e628da9e"
+    },
+    {
+      "path": "core/web/library/library-management.js",
+      "sha256": "af2fbaa4ad2aba0e4c4831a737176dd69b877e214ac7ac2ebf144cb8059d0c77"
+    },
+    {
+      "path": "core/web/library/library-resize.js",
+      "sha256": "6706226a779c2e063dadde691ea146bb08a942bad94381b3603e3eab28a60262"
+    },
+    {
+      "path": "core/web/library/library-transfer.js",
+      "sha256": "67b7d21ce4c78c1efbce1e7d5f9adb150cc713076e246b985c15f765cdbdfdf1"
+    },
+    {
+      "path": "core/web/library/library-view.js",
+      "sha256": "c4a0aaa1bbe9ee7f7f9c44198185d9a1340d2ffba7fa26dbae86750383fe452b"
+    },
+    {
+      "path": "core/web/library/native-import.js",
+      "sha256": "3c612351c7d2534967ad31221f210d21a3263b652d1932521bbecd34faf6d120"
+    },
+    {
+      "path": "core/web/listening/audio-player.css",
+      "sha256": "0e00414e891566e36fd0ece08f6011c51100fba087e4abefdf1b16b349cfee7d"
+    },
+    {
+      "path": "core/web/listening/audio-player.js",
+      "sha256": "0239d37d3b62c3773be9dd0248c994b4d154e5bf2fd4a36bd6ff8ac587c248cf"
+    },
+    {
+      "path": "core/web/listening/geometry.js",
+      "sha256": "edf02f460ddb0655532074a744f257f5fd5ef2e5317edccd8108a07ca4f096ea"
+    },
+    {
+      "path": "core/web/listening/listening-player.js",
+      "sha256": "3cfbe71e09c79621f7db025cf4cc83386181ff3c40782346afa32e604b99c72b"
+    },
+    {
+      "path": "core/web/listening/listening.css",
+      "sha256": "2df1f9d52f18550c47b56d3d564cb4b6be12d0cf694ae5d4e16f9b60497ac3b9"
+    },
+    {
+      "path": "core/web/listening/network-audio.js",
+      "sha256": "54f2f83098bd2c302a9be08b68f047aec72fbfb99de0569e12c37be85467cbc2"
+    },
+    {
+      "path": "core/web/listening/player-drag.js",
+      "sha256": "dd3f6ccd58783ffe54f284dd9c0ac01dd4ca39c5c1f3b1551a2cd5d68f8978e0"
+    },
+    {
+      "path": "core/web/manifest.webmanifest",
+      "sha256": "f62db06b60343b3aff0b543fff016d99b99ae7c62bae6df0ed49269a732ce851"
+    },
+    {
+      "path": "core/web/outline/outline-groups.js",
+      "sha256": "0ee546f954deb5ec17c5608274886dd5792ca95e9851b5cf92ee2347fe4749d9"
+    },
+    {
+      "path": "core/web/outline/outline-navigation.js",
+      "sha256": "e92555b93310f2eb2c1779d47e1dad03d0dea2d27defa2047cd39bf10b72154b"
+    },
+    {
+      "path": "core/web/outline/outline-view.js",
+      "sha256": "74c00f774ccb779e22bed59903fff742663f4c747678ff0120c4625b413871e4"
+    },
+    {
+      "path": "core/web/practice/answer-preview.js",
+      "sha256": "1cffaa7a8c23ba788cc2bdb8f226262818948cc0ef3780653e8fc3006668863a"
+    },
+    {
+      "path": "core/web/practice/collection-loading.js",
+      "sha256": "9ad7d5f867848fded241e6e7287644dc3aaa780ff5c514cbc5849e60e9f3bdf8"
+    },
+    {
+      "path": "core/web/practice/practice-context.js",
+      "sha256": "48b3bbbe7345bae7c14074f361e8b0b37b8a234031146d8a73b1c10a27c1f841"
+    },
+    {
+      "path": "core/web/practice/practice-summary.css",
+      "sha256": "dba40c529c84069e04e82dd303da290fc3bd08801219f3e0441692ec9432fa19"
+    },
+    {
+      "path": "core/web/practice/practice-summary.js",
+      "sha256": "7312cd6d24efb6277eaa109dc0e53b596809370eeb1d72366b34955539a8097d"
+    },
+    {
+      "path": "core/web/practice/question-cache.js",
+      "sha256": "b6756ececa30a42f776376f7470001ba463da1e372274d58fd8eaa53ad629d08"
+    },
+    {
+      "path": "core/web/practice/question-layout.js",
+      "sha256": "08e7438ffd2ce3917495780d0862f70db3e212bf72cc645e69669aa7b08a4490"
+    },
+    {
+      "path": "core/web/practice/question-navigation.js",
+      "sha256": "b206b08189d8097c6aedd1ada387b2152495c5320d128c95c7ad34ba1320a7ad"
+    },
+    {
+      "path": "core/web/practice/save-recovery.js",
+      "sha256": "760bd43d44c87607825394d3cfa641c328f6253b7842449aa81834c2cfe22bf0"
+    },
+    {
+      "path": "core/web/shared/answer-area-channel.js",
+      "sha256": "fb1cce4829f290778fb6def70dcf20c97f1a43f4dd61d00d7112a740450a4adb"
+    },
+    {
+      "path": "core/web/shared/api.js",
+      "sha256": "df284aba6377f48deef1551af373f70d33524918291d4d4f93c2fac9e6ce2e87"
+    },
+    {
+      "path": "core/web/shared/write-queue.js",
+      "sha256": "250920af6d96f4cbbbeafa5407e762653046832cec60af3045092e0f77da7440"
+    },
+    {
+      "path": "core/web/shell/admin-contact.css",
+      "sha256": "04a35d7098fab3d2db6118a189d216d56fdf7b0c8a4e1209dd555d03a89d00cb"
+    },
+    {
+      "path": "core/web/shell/admin-contact.js",
+      "sha256": "d0641f93943300a3f8d512a8460c19c7155f03572f13b702366b6f48c4d28aa5"
+    },
+    {
+      "path": "core/web/shell/app.css",
+      "sha256": "a0cbfcf167290b4c551e242c9bb5455dea4e1425a6b330dd9abd182194bfafc9"
+    },
+    {
+      "path": "core/web/shell/appearance.js",
+      "sha256": "407cf472b6fd551551dd0cf777553ae47fbe6d98728b96d5b588658f01e3db92"
+    },
+    {
+      "path": "core/web/shell/network-settings.css",
+      "sha256": "392eca52c60f3afe67374637d56edb1436c0bb0db096ee888cef40ab28390f27"
+    },
+    {
+      "path": "core/web/shell/network-settings.js",
+      "sha256": "e323120e395fcce71aa7d874f417d12376b7cf4f9e113de58182ffeb559cf321"
+    },
+    {
+      "path": "core/web/shell/refinements.css",
+      "sha256": "ae56ad7bebf0e253ea841ee8ea74827ef42d1124db76fffda6624e94b243faae"
+    },
+    {
+      "path": "core/web/shell/themes.css",
+      "sha256": "449d11204676ca9dc7ca1bff144fc3ed5b535f483eeff06ed59b547ad20a4f59"
+    }
+  ],
+  "inventorySha256": "618b8045e1f70015cb943ac0513d0ded557512cc4ae7be3adf2088a9c8c5d634"
+}

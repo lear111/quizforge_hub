@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { encryptKey, decryptKey, connection, setSession, session, clearSessions, testConnection } from '../public/cloud/vault.js';
+import { encryptKey, decryptKey, connection, setSession, session, clearSessions, testConnection } from '../practice/public/cloud/vault.js';
 
 test('本地密文绑定账户、站点和模型地址，口令不保存，篡改与错误口令拒绝解锁', async () => {
   const bound = { account: 'alice', origin: 'https://hub.example.test', endpoint: 'https://model.example.test/v1' };

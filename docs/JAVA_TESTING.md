@@ -1,9 +1,9 @@
 # 当前验证入口与旧测试整理
 
-`Verify-Java-Hub.ps1` 执行Java构建及全部Node测试，Node并发限制为4。开发需JDK21+、Maven及Node24；练习用例需经审阅、适合本机系统的固定Web快照。
+`scripts/Verify-Java-Hub.ps1` 执行Java构建及全部Node测试，Node并发限制为4。开发需JDK21+、Maven及Node24；练习用例需经审阅、适合本机系统的固定Web快照。
 
 ```powershell
-.\Verify-Java-Hub.ps1 -PracticeRuntime '<固定运行时目录>'
+.\scripts\Verify-Java-Hub.ps1 -PracticeRuntime '<固定运行时目录>'
 ```
 
 已有当前JAR且只改Node／测试时可 `-SkipBuild`。`npm test` 只执行Node侧，未设置 `HUB_JAVA_JAR` 会跳过Java联调，不能因此声称完整通过。外观DOM测试还需要 `QFH_TEST_UI_PACKAGE` 指向能解析jsdom的包；缺少时如实记为跳过。

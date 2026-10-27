@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createAdminContactSource} from '../cloud/admin-contact.mjs';
+import {createAdminContactSource} from '../practice/server/cloud/admin-contact.mjs';
 
 test('the internal contact reader uses a fixed anonymous endpoint and rejects redirects, oversize or malformed data', async () => {
   let seen;

@@ -1,6 +1,8 @@
 # Hub Java 迁移进度
 
-开始：2026-10-24；更新：2026-10-25。当前分支 `feat/hub-java-migration-20261024`，基线 `e4af7fe`。本轮已补齐原生 Hub 业务代码及独立练习衔接，测试站已更新到 `20261025-java-complete-e4af7fe`，数据及公网HTTP流程核对通过；生产未切换，代码未提交、推送或合并。
+开始：2026-10-24；更新：2026-10-27。正式站已发布 `20261027-java-network-concurrency-r2`：Java Hub 加独立 Node 练习，包含最新 Web 固定快照与跨账号并发修复。停写副本、旧表／文件保留及失败回退已验证，详见[正式发布记录](../deploy/production-20261027.md)。当前发布来自本地 `refactor/hub-layout-20261025` 工作区及冻结清单，部署不等于 Git 提交或合并。
+
+下文“本轮实现与验证”保留 2026-10-25 的历史迁移过程；其中生产未切换、旧测试版本及当时用例数量不描述当前线上状态。
 
 ## 已确认边界
 
@@ -16,28 +18,29 @@
 - [x] 第二阶段：账号注册登录、原密码／Cookie兼容、邮箱／手机号验证码、Turnstile、动态策略、邀请码、补绑、S256设备授权与撤销。
 - [x] 第三阶段代码及自动验证：格式3包目录、单本／部分导出、真实分享上传／编辑／删除、评论举报、管理员、版本冲突、不可变审核包、代码白名单、下架与撤销、审计和持久化审核邮件队列。
 - [x] 第四阶段代码及自动验证：AI加密配置、上游管理、整数余额／兑换／赠送账本、网关、成功后事务计费及失败不扣款；活动统计、练习SSO／内部接口、固定版本导入和云端衔接。保留旧成功后计费语义，不虚构预扣／退款机制。
-- [ ] 第五阶段：完整公网数据核对、真实浏览器／手机／系统回调、邮件短信／模型供应商、容量与故障测试、生产数据副本及切换恢复演练；最后决定生产替换。
+- [x] 第五阶段中的生产副本、停写备份、数据核对、切换和失败回退：2026-10-27 完成，正式站已迁 Java。
+- [ ] 真实浏览器／手机／系统回调、真实邮件短信／模型供应商、完整容量与故障验收；这些不由 HTTP／合成检查替代。
 
 前四阶段完成指代码和自动验证范围，不代表真实供应商、设备或生产迁移已验收。
 
 ## 本轮实现与验证
 
-原生管理和AI细节见 [管理与衔接说明](JAVA_ADMIN_AI_PRACTICE.md)。审核先冻结当前文件及 revision／SHA，明确完成人工代码检查后才可批准；未审拓展不执行，不为演示放宽注册、账号或白名单规则。Node练习通过固定回环接口访问Java身份／额度／AI，独立数据目录继续保存工作区和历史。
+原生管理和AI细节见 [管理与衔接说明](./JAVA_ADMIN_AI_PRACTICE.md)。审核先冻结当前文件及 revision／SHA，明确完成人工代码检查后才可批准；未审拓展不执行，不为演示放宽注册、账号或白名单规则。Node练习通过固定回环接口访问Java身份／额度／AI，独立数据目录继续保存工作区和历史。
 
-`Verify-Java-Hub.ps1` 当前 Java 65 项、Node 44 项全部通过，0失败／跳过，见 `.temp/java-migration-evidence-20261025/.temp-java-native-migration-final.log`。包含Node／Java旧凭据与AES-GCM双向互认、真实HTTP、上传回滚、权限／来源／版本冲突、审核冻结／撤销、同一身份资源管理、SSO及中心退出。模型用合成传输，未调用真实邮件、短信或付费模型。清理前的旧后端对照阶段，全量Node回归178项通过、0失败、2项环境跳过；见`.temp/java-migration-evidence-20261025/.temp-node-all-final.log`。
+`scripts/Verify-Java-Hub.ps1` 当前 Java 65 项、Node 44 项全部通过，0失败／跳过，见 `.temp/java-migration-evidence-20261025/.temp-java-native-migration-final.log`。包含Node／Java旧凭据与AES-GCM双向互认、真实HTTP、上传回滚、权限／来源／版本冲突、审核冻结／撤销、同一身份资源管理、SSO及中心退出。模型用合成传输，未调用真实邮件、短信或付费模型。清理前的旧后端对照阶段，全量Node回归178项通过、0失败、2项环境跳过；见`.temp/java-migration-evidence-20261025/.temp-node-all-final.log`。
 
 测试站：<https://quizforge-test.treenewbee.cloud/>，配套练习：<https://practice-test.treenewbee.cloud/>。本轮更新了Java与练习的匹配端口／Cookie配置，保留原Linux固定运行时800份文件；没有把Windows依赖部署到Linux。旧Node测试Hub仍保留作回退，Caddy与生产服务不切换。
 
 测试站数据来源仍是用户选择的旧Node测试站完整副本，包含6个旧账号，生产数据未迁入。验证策略继承原库；测试邮件／短信／验证码及模型主密钥未复制，不因此降低验证或承诺真实免费模型可用。AI余额可查询，模型实际调用仍须配置并验收。
 
-本轮运行、验收和回退见[完整业务迁移测试部署](../deploy/java-test-complete-2026-10-25.md)。
+本轮运行、验收和回退见[完整业务迁移测试部署](../deploy/archive/java-test-complete-2026-10-25.md)。
 
 ## 旧阶段记录
 
-- [初次测试部署](../deploy/java-test-2026-10-25.md)、[账号部署](../deploy/java-test-accounts-2026-10-25.md)
-- [旧测试数据副本迁移](../deploy/java-test-data-migration-2026-10-25.md)：当时39张原表、5个文件及6个账号身份核对通过。
-- [原型用户中心](../deploy/java-test-profile-ui-2026-10-25.md)、[详情与47本真实英语目录](../deploy/java-test-pack-detail-2026-10-25.md)
-- [分享上传／编辑部署](../deploy/java-test-publishing-2026-10-25.md)：当时Java43／Node29项通过，原记录与文件保留。
+- [初次测试部署](../deploy/archive/java-test-2026-10-25.md)、[账号部署](../deploy/archive/java-test-accounts-2026-10-25.md)
+- [旧测试数据副本迁移](../deploy/archive/java-test-data-migration-2026-10-25.md)：当时39张原表、5个文件及6个账号身份核对通过。
+- [原型用户中心](../deploy/archive/java-test-profile-ui-2026-10-25.md)、[详情与47本真实英语目录](../deploy/archive/java-test-pack-detail-2026-10-25.md)
+- [分享上传／编辑部署](../deploy/archive/java-test-publishing-2026-10-25.md)：当时Java43／Node29项通过，原记录与文件保留。
 
 每份记录描述当时状态；其中“审核／AI尚待迁移”等限制已经由本轮源码补齐，不应解读为当前能力。
 
@@ -45,8 +48,8 @@
 
 “提交后继续草稿批注”保留在后续共享练习核心计划：提交答案与评分材料冻结，后续批注独立保存，擦除／撤销不改变正式答案。它属于 `quizforge_web` 核心，不会随Hub换Java自动实现，本轮未实施。
 
-## 上线前剩余验收
+## 发布后仍需单独验收
 
-当前浏览器工具受Work设置限制，HTTP／模板和模拟会话不能代替真实点击、文件选择、手机书写或Android回调。待完成这些验收及生产副本、容量和恢复演练后，再评审PR与生产切换。不得仅依据健康检查200或测试DNS就宣布正式站已迁移。
+HTTP／模板和模拟会话不能代替真实点击、文件选择、手机书写、Android回调或实际供应商调用。正式迁移以本次服务器发布、停写数据核对和公网目标验证为依据；不能将这些证据扩展为设备、真实 AI 质量或 30 人容量验收。
 
-旧实现删除、维护迁移与当前测试分工见[清理记录](JAVA_CLEANUP_2026-10-25.md)、[维护命令](JAVA_MAINTENANCE.md)和[测试映射](JAVA_TESTING.md)。本次清理仅更新本机源码，没有再次部署或重启测试站／生产。
+旧实现删除、维护迁移与当前测试分工见[清理记录](./archive/JAVA_CLEANUP_2026-10-25.md)、[维护命令](./JAVA_MAINTENANCE.md)和[测试映射](./JAVA_TESTING.md)。本次清理仅更新本机源码，没有再次部署或重启测试站／生产。

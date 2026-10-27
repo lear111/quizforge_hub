@@ -4,15 +4,43 @@ Hub 刷题工作区以 Web 为功能和交互基线，先完整同步，再讨�
 
 ## 同步来源
 
-2026-10-23 候选已更新到 Web 外观提交 `60ab0d73d0c410d5bc7687d6fb7d0782bd1bec6e`，叠加从指定基础题型目录审阅并冻结的 12 个工作区文件。**这不是纯提交快照**：`includesWorkingTree: true`。精确来源、覆盖文件原始字节及其基线 SHA-256、241 项运行时源码／基础内容锁定见 [web-workspace-20261023.json](../deploy/web-workspace-20261023.json)，覆盖文件保存在 `vendor/web-basic-20261023/`，保留原换行字节。
+### 2026-10-27 网络听力增量候选
 
-新增青屿主题、SVG、设置齿轮样式及主题设置交互；五个基础拓展更新为单选／多选／判断 2.0.2、简答 2.0.3、答题区简答 1.0.5。新空间使用带新三角形插图的 11 题展示库；既有空间保留原题库、拓展、作答和历史，启动不重导入默认内容。详细差异与验收范围见 [2026-10-23 同步记录](WEB_WORKSPACE_SYNC_20261023.md)。本候选尚未部署或发布。
+最新候选来源为同一 Web 基线 `4522bb81c2126a699fcf72ce61d074dbc1264161`，加31份冻结覆盖，`includesWorkingTree:true`；253项源码／基础内容输入见 [web-workspace-20261027-network.json](../practice/vendor/locks/web-workspace-20261027-network.json)。覆盖原始字节位于 `practice/vendor/web-sync-20261027-network/`，Git不转换换行。之前的清单和运行快照保留。
 
-2026-10-22 起运行时基于 Web `2ad03a1b842f3b74180c6a6f7b45f3a3cc35a43c` 的干净检出（`includesWorkingTree: false`），锁定清单为 [web-workspace-20261022.json](../deploy/web-workspace-20261022.json)：239 个源码/基础内容文件，清单摘要 `df06d68cc24d2254fd870be664444e34b6fe8dfc887dcb829a142e0c1ca1ced3`。基础拓展为单选/多选/判断 2.0.1、简答题 2.0.2、简答题（答题区）1.0.4。包含重做草稿墨迹修复、手机答题区墨迹修复、新版 AI 设置（开关、免费 AI 额度/自定义模型两个来源、用户中心）和模型图片测试修改。云端的 AI 设置与用户中心按 [HUB_CONNECT_AI.md 第 7.3 节](HUB_CONNECT_AI.md) 适配：免费额度直接使用登录的 Hub 账号余额，不加载 Web 的登录窗口和设备退出。
+相对上一轮，运行时只改变5个文件，加入题库听力材料的 `url` 来源、网络材料扫描／考试引用、宿主CSP、播放器与独立匿名网络读取器。支持同题库混用 `file` 和 HTTPS `url`；浏览器完整缓存当前一段后播放，网络单段64MiB、120秒期限、两段页面Blob缓存。请求不发送Cookie、账号／设备令牌或Referrer，不跟随重定向；音频服务须允许CORS。切换取消并丢弃过期响应，显式重试丢弃旧Blob并重新读取。
+
+Hub练习页面自己的CSP同步允许HTTPS connect和Blob媒体播放；题型iframe仍为 `connect-src 'none'`，云端账号、所有权、配额、同源写入和拓展审核保持。后端不下载或代理远程URL，资源访问不穿过账号工作区的检查点／备份通道。普通题库导出只保留URL，考试只冻结URL，不保证远程字节不被覆盖；本地音频仍随题库及考试快照复制。
+
+本轮保留之前同步的悬浮听力播放器、导入缓存、分组默认收起／中央空白启动、人工评分即时反馈、答题区1.4.2及草稿横线。新默认样例和基础拓展摘要与上一轮一致，不覆盖既有账号题库、答案、笔迹或历史。
+
+Windows候选目录 `.runtime/web-sync-20261027-network`，812个文件；目标Linux必须用当地匹配依赖重建。构建与验收状态见 [网络听力同步记录](../deploy/web-sync-20261027-network.md)。源码同步、运行快照构建和服务器切换是独立步骤，不把候选验证当作已上线。
+
+### 2026-10-27 候选：Web 新功能完整同步
+
+本轮来源为 Web `4522bb81c2126a699fcf72ce61d074dbc1264161`，叠加经过冻结的 27 个工作区文件，`includesWorkingTree:true`。精确来源见 [web-workspace-20261027.json](../practice/vendor/locks/web-workspace-20261027.json)，覆盖原件位于 `practice/vendor/web-sync-20261027/`；252 个运行时源码／基础内容文件按摘要核对。不会直接读取 Web 工作目录后续变化，也不包含个人题库、账号设置、作答、测试目录或安装包。
+
+- 同步宿主悬浮听力播放器：只在相应题目出现，可拖动、最小化、左右调整宽度，播放／暂停、倍速、材料切换和进度拖动沿用 Web；音频通过当前账号、当前题库的私有接口读取。
+- 同步题库加载缓存优化；启动时收起题库分组、中央不自动加载题目，明确的导入跳转仍打开新题库。
+- 同步基础简答题及答题区的人工评分即时反馈；保留原防抖保存、失败保留及只读权限。
+- 答题区组件升至 1.4.2，拓展可通过 `sharedInk:true,paperStyle:"ruled"` 指定横线，默认空白；草稿现有纸面设置增加横线。辅助线不进入 AI 评分图，旧答案格式与冻结组件保留。
+- Hub 保留云端账号、同源访问、免费 AI 额度、自定义模型、配额、拓展审核与撤销边界；不暴露本机网络或开发管理入口。本轮同时交付管理员本人同页直接发布、新用户自动免费评分及提交后的即时任务状态。
+
+既有工作区的题库、拓展代码、作答和历史不被默认样例覆盖；基础拓展的脚本更新用于新建工作区或明确导入的新副本。需要让既有题库采用新脚本时，应另行更新对应拓展，不能以重导入或清空练习替代升级。
+
+Windows 候选为 `.runtime/web-sync-20261027`，Linux 在测试主机使用原有匹配依赖重新构建，两个平台的上述 252 项输入一致。候选与服务部署状态分别记录在 [本次测试部署](../deploy/web-sync-20261027.md)，不能把构建完成当作服务器已更新。
+
+### 早期同步记录
+
+2026-10-23 候选已更新到 Web 外观提交 `60ab0d73d0c410d5bc7687d6fb7d0782bd1bec6e`，叠加从指定基础题型目录审阅并冻结的 12 个工作区文件。**这不是纯提交快照**：`includesWorkingTree: true`。精确来源、覆盖文件原始字节及其基线 SHA-256、241 项运行时源码／基础内容锁定见 [web-workspace-20261023.json](../practice/vendor/locks/web-workspace-20261023.json)，覆盖文件保存在 `practice/vendor/web-basic-20261023/`，保留原换行字节。
+
+新增青屿主题、SVG、设置齿轮样式及主题设置交互；五个基础拓展更新为单选／多选／判断 2.0.2、简答 2.0.3、答题区简答 1.0.5。新空间使用带新三角形插图的 11 题展示库；既有空间保留原题库、拓展、作答和历史，启动不重导入默认内容。详细差异与验收范围见 [2026-10-23 同步记录](./archive/WEB_WORKSPACE_SYNC_20261023.md)。本候选尚未部署或发布。
+
+2026-10-22 起运行时基于 Web `2ad03a1b842f3b74180c6a6f7b45f3a3cc35a43c` 的干净检出（`includesWorkingTree: false`），锁定清单为 [web-workspace-20261022.json](../practice/vendor/locks/web-workspace-20261022.json)：239 个源码/基础内容文件，清单摘要 `df06d68cc24d2254fd870be664444e34b6fe8dfc887dcb829a142e0c1ca1ced3`。基础拓展为单选/多选/判断 2.0.1、简答题 2.0.2、简答题（答题区）1.0.4。包含重做草稿墨迹修复、手机答题区墨迹修复、新版 AI 设置（开关、免费 AI 额度/自定义模型两个来源、用户中心）和模型图片测试修改。云端的 AI 设置与用户中心按 [HUB_CONNECT_AI.md 第 7.3 节](./HUB_CONNECT_AI.md) 适配：免费额度直接使用登录的 Hub 账号余额，不加载 Web 的登录窗口和设备退出。
 
 以下为 2026-10-21 的记录：
 
-2026-10-21 的候选运行时基于 Web `b8e0c0683edeb3067b739d0dd474fb4504770c7a`，并包含当时工作区内的后续修复。它不是该提交的纯净检出；精确输入见 [文件锁定清单](../deploy/web-workspace-20261021.json)。清单保存实际 server/web/shared、基础展示和 package lock 的逐文件 SHA-256。
+2026-10-21 的候选运行时基于 Web `b8e0c0683edeb3067b739d0dd474fb4504770c7a`，并包含当时工作区内的后续修复。它不是该提交的纯净检出；精确输入见 [文件锁定清单](../practice/vendor/locks/web-workspace-20261021.json)。清单保存实际 server/web/shared、基础展示和 package lock 的逐文件 SHA-256。
 
 本机候选为 `.runtime/web-20261021-parity`，旧 `.runtime/web-current` 未覆盖。运行快照是忽略的构建产物，不随 Hub Git 提交自动分发。其他协作者需要取得清单匹配的 Web 源码再构建；后续由 Web 维护者提交这些修复后，应记录对应的新提交，不把旧提交号冒充完整来源。
 
@@ -45,7 +73,7 @@ Hub 刷题工作区以 Web 为功能和交互基线，先完整同步，再讨�
 node scripts/stage-web-workspace.mjs <Web Git仓库> <新的运行时目录> <目标平台node_modules目录>
 ```
 
-生成的 `snapshot.json` 记录提交、`includesWorkingTree: true`、覆盖文件摘要及完整来源清单摘要；构建核对全部 241 项源码／基础内容。`.runtime/web-20261023-coast-verified` 为 Windows 候选；Linux 候选必须使用 Linux 依赖重新构建，不能复用 Windows 原生模块。
+生成的 `snapshot.json` 记录提交、`includesWorkingTree: true`、覆盖文件摘要及完整来源清单摘要。默认使用 20261027-network 清单并核对全部253项源码／基础内容；可通过第4个参数指定旧清单。Linux候选必须使用Linux依赖重新构建，不能复用Windows原生模块。
 
 在目标平台准备 Web lock 对应的依赖，再使用新目录构建：
 
@@ -57,7 +85,11 @@ node scripts/stage-cloud-runtime.mjs <Web源码目录> <新的运行时目录> [
 
 Windows 测试可设置 `QFH_TEST_RUNTIME` 指向新候选。`test/workspace-parity.test.mjs` 要求答题区候选存在；迁移用例另需旧 `.runtime/web-current`。缺少运行时导致的跳过不等同于验收通过。
 
-发布前必须在目标 Linux 上确认可用的中文和西文字体。最初首尔隔离检查只有 DejaVu；随后经授权部署，已安装 Noto CJK 与 fontconfig，并用练习服务账号生成中英文字体检查图片，人工查看中文显示正常。详见[部署记录](../deploy/workspace-2026-10-21.md)。仍需实际浏览器验证答题区文字/手写/图片、手机触控、单题编辑离开拦截和原生文件选择。模型检查使用合成响应，不代表真实供应商已调用。
+最新候选可执行 `pwsh -File scripts/Verify-Java-Hub.ps1 -SkipBuild -PracticeRuntime .runtime/web-sync-20261027-network`；`-SkipBuild`只适用于Java源码未改且已有匹配JAR的情况。需要测试旧候选时，同时用 `QFH_TEST_SOURCE_LOCK` 指定其锁定清单，避免拿新清单验证旧快照。
+
+界面DOM检查依赖JSDOM。验证脚本会优先复用相邻Web的现有开发依赖，也可用 `-UiPackage <含JSDOM依赖的package.json>` 显式指定；它只用于测试，不进入运行包。仍需核对结果中的跳过项，缺少DOM依赖不能视为界面验收通过。
+
+发布前必须在目标 Linux 上确认可用的中文和西文字体。最初首尔隔离检查只有 DejaVu；随后经授权部署，已安装 Noto CJK 与 fontconfig，并用练习服务账号生成中英文字体检查图片，人工查看中文显示正常。详见[部署记录](../deploy/archive/workspace-2026-10-21.md)。仍需实际浏览器验证答题区文字/手写/图片、手机触控、单题编辑离开拦截和原生文件选择。模型检查使用合成响应，不代表真实供应商已调用。
 
 ## 后续协作流程
 

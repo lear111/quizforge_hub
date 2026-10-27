@@ -1,6 +1,6 @@
 # 贡献指南
 
-欢迎通过 Issue 和 Pull Request（PR）参与 QuizForge Hub。Hub 负责云端账户、题库广场、用户隔离、配额和云端适配；共享刷题核心由 [quizforge_web](https://github.com/lear111/quizforge_web) 维护。两个仓库共用的提交与发布约定见 [开发流程](docs/DEVELOPMENT_WORKFLOW.md)。
+欢迎通过 Issue 和 Pull Request（PR）参与 QuizForge Hub。Hub 负责云端账户、题库广场、用户隔离、配额和云端适配；共享刷题核心由 [quizforge_web](https://github.com/lear111/quizforge_web) 维护。两个仓库共用的提交与发布约定见 [开发流程](./docs/DEVELOPMENT_WORKFLOW.md)。
 
 ## 参与方式
 
@@ -14,13 +14,13 @@
 Hub 开发需要 JDK 21+、Maven 3.6.3+；练习服务及 Node 测试需要 Node.js 24.13+ 的 24.x。仓库已移除旧 Node Hub 实现。
 
 ```powershell
-.\Verify-Java-Hub.ps1
+.\scripts\Verify-Java-Hub.ps1
 .\Start-Java-Hub.ps1 -SkipBuild
 ```
 
-默认 `http://127.0.0.1:4338/`，新开发目录为空。使用合成数据或明确准备的停写副本，不连接生产数据、供应商配置或真实用户 Key。维护命令不会隐式选择数据目录，见[Java 维护说明](docs/JAVA_MAINTENANCE.md)。
+默认 `http://127.0.0.1:4338/`，新开发目录为空。使用合成数据或明确准备的停写副本，不连接生产数据、供应商配置或真实用户 Key。维护命令不会隐式选择数据目录，见[Java 维护说明](./docs/JAVA_MAINTENANCE.md)。
 
-完整练习测试需要经审阅的 Web 快照。按[工作区来源说明](docs/WEB_WORKSPACE_SYNC.md)构建，或用 `-PracticeRuntime <目录>` 指定已有快照；目标系统的依赖必须匹配。没有快照／JAR导致跳过的执行不能算联合验收。测试分工与旧协议样本见[测试说明](docs/JAVA_TESTING.md)。
+完整练习测试需要经审阅的 Web 快照。按[工作区来源说明](./docs/WEB_WORKSPACE_SYNC.md)构建，或用 `-PracticeRuntime <目录>` 指定已有快照；目标系统的依赖必须匹配。没有快照／JAR导致跳过的执行不能算联合验收。测试分工与旧协议样本见[测试说明](./docs/JAVA_TESTING.md)。
 
 ## 修改要求
 

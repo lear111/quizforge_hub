@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { CloudAccounts } from '../cloud/accounts.mjs';
-import { CloudLibrary, treeBytes } from '../cloud/library.mjs';
-import { extensionDigest } from '../cloud/extension-review.mjs';
+import { CloudAccounts } from '../practice/server/cloud/accounts.mjs';
+import { CloudLibrary, treeBytes } from '../practice/server/cloud/library.mjs';
+import { extensionDigest } from '../practice/server/cloud/extension-review.mjs';
 import { Readable } from 'node:stream';
 
 const snapshot = path.resolve((process.env.QFH_TEST_RUNTIME || fileURLToPath(new URL('../.runtime/web-current', import.meta.url))));

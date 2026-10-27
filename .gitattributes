@@ -1,4 +1,5 @@
 * text=auto eol=lf
 *.png binary
 # Preserve the exact reviewed Web working-tree bytes, including original line endings.
-vendor/web-basic-20261023/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+practice/vendor/web-basic-20261023/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+practice/vendor/web-sync-*/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
